@@ -1,4 +1,3 @@
-markdown
 # ML Stability Evaluation Toolkit
 
 ## Overview
