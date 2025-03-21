@@ -117,4 +117,4 @@ Contributions welcome through:
 3. 💡 Feature Proposals
 
 ## License
-MIT © 2024 Your Name
+MIT © 2024 LDF
