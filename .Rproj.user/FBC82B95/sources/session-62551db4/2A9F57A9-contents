@@ -1,0 +1,75 @@
+###machine learning for one step
+library(caret)
+library(pROC)
+library(tidyverse)
+library(survival)
+library(survminer)
+library(glmnet)  # 需要安装用于Cox模型
+library(patchwork)
+library(MLpack)
+
+
+###数据输入前建议先检出数据结构和特征类型###
+
+
+data$group = factor(data$group)  ###注意需要样本分组位于数据第一列
+
+
+N = 5
+seed = sample(1:10000,N)
+
+dir.create("test")
+setwd("./test")
+batch_execute_X(expression_matrix = data ,
+                N = N,topn = 10,
+                train_percent = 0.7,
+                n_round = 20,
+                seed = seed)
+
+
+#################################上面是分类模型##########################################
+
+#################################下面是cox生存模型##########################################
+setwd("C:/Users/admin/Desktop/cox20250314/OS生存分析建模/")
+
+###注意需要数据格式要求：第一列是time，第二列是status，其它列是特征
+surv_data = openxlsx::read.xlsx("./OS代谢组数据.xlsx",1,check.names = F,rowNames = T)
+
+# setwd("C:/Users/admin/Desktop/cox20250314/OS生存分析建模/result1/代谢组/")
+
+N = 5
+seed = sample(1:10000,N)
+
+
+batch_execute_cox(data = surv_data,#cox数据，数据格式要求：第一列是time，第二列是status，其它列是特征
+                  N = N,#代表N次随机分割数据，分割的随机种子见seed
+                  seed = seed,#这个seed由上面生产N的随机种子，也可以自定义一个向量，N个seed会出来N个结果
+                  bestcut = T,
+                  version = 2,#version2是先特征筛选后分割数据，比较宽松,1是先分割后特征筛选和数据标准化，小队列测试效果一般比较差
+                  stratify= F,#过采样与否，过采样暂时没有优化好先不用使用Ture
+                  lambda_type ="lambda.min",#lambda最优参数的选择方法，另一个是lambda.se1
+                  topn = 10,
+                  n_round = 20,
+                  train_percent = 0.6)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

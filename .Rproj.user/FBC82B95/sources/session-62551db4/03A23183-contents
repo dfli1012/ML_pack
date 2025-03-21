@@ -1,0 +1,1143 @@
+
+
+
+feature_selection_coxlasso <- function(data, seed=123, n_round=20, topn=10, lambda_type="lambda.min") {
+  # 参数说明：
+  # data: 数据框，前两列分别为生存时间(time)和生存状态(status)
+  # seed: 随机种子
+  # n_round: 重采样轮次
+  # topn: 保留的顶级特征数
+  # lambda_type: 正则化参数选择类型 ("lambda.min"或"lambda.1se")
+  
+  require(glmnet)
+  set.seed(seed)  # 初始化随机种子
+  
+  # 提取生存数据
+  survival_time <- data[, 1]
+  survival_status <- data[, 2]
+  X <- as.matrix(data[, -c(1:2), drop = FALSE])
+  
+  # 初始化特征重要性矩阵
+  coef_matrix <- matrix(0, nrow = n_round, ncol = ncol(X))
+  colnames(coef_matrix) <- colnames(X)
+  
+  for (i in 1:n_round) {
+    # 分层Bootstrap重抽样（保持事件比例）
+    event_indices <- which(survival_status == 1)
+    nonevent_indices <- which(survival_status == 0)
+    
+    sampled_event <- sample(event_indices, size = length(event_indices), replace = TRUE)
+    sampled_nonevent <- sample(nonevent_indices, size = length(nonevent_indices), replace = TRUE)
+    sampled_indices <- c(sampled_event, sampled_nonevent)
+    
+    # 准备重采样数据
+    X_sample <- X[sampled_indices,,drop = FALSE]
+    y_sample <- cbind(time = survival_time[sampled_indices],
+                      status = survival_status[sampled_indices])
+    
+    # 拟合Cox LASSO模型
+    cv_fit <- cv.glmnet(X_sample, y_sample,
+                        family = "cox", 
+                        alpha = 0.5,  # LASSO正则化
+                        nfolds = 5,
+                        grouped = TRUE)
+    
+    # 提取非零系数特征
+    final_coef <- as.vector(coef(cv_fit, s = cv_fit[[lambda_type]]))
+    coef_matrix[i, ] <- abs(final_coef)  # 取绝对值作为重要性指标
+    
+    # 显示进度
+    if(i %% 5 == 0) message("完成第 ", i, "/", n_round, " 轮重采样")
+  }
+  
+  # 计算平均特征重要性
+  avg_coef <- colMeans(coef_matrix)
+  ranked_features <- names(sort(avg_coef, decreasing = TRUE))[1:topn]
+  
+  #ranked_features = ranked_features[-which(colMeans(coef_matrix)==0)]
+  
+  # 构建结果数据
+  selected_data <- cbind(data[, 1:2], X[, ranked_features, drop = FALSE])
+  
+  
+  colnames(selected_data)[1:2] <- c("time", "status")
+  
+  # 创建重要性排序表
+  importance_table <- data.frame(
+    Feature = names(avg_coef),
+    Importance = avg_coef,
+    Rank = rank(-avg_coef, ties.method = "min")
+  )[order(-avg_coef), ]
+  rownames(importance_table) <- NULL
+  
+  return(list(
+    selected_matrix = selected_data,
+    importance_table = importance_table,
+    coef_matrix = coef_matrix  # 原始系数矩阵供进一步分析
+  ))
+}
+
+surv_data_split <- function(data, train_ratio=0.7, seed = NULL, stratify=TRUE) {
+  require(dplyr)
+  
+  # 强制转换生存时间列为数值型
+  if(!is.numeric(data[,1])) {
+    data[,1] <- as.numeric(data[,1])
+    warning("已将生存时间列转换为数值型")
+  }
+  
+  # 显式转换为标准数据框
+  data <- as.data.frame(data) %>% 
+    mutate(across(where(is.list), as.vector))  # 移除潜在的非常规类型
+  
+  # 重命名前两列
+  colnames(data)[1:2] <- c("time", "status")
+  
+  # 添加事件状态因子校验
+  data$status <- as.factor(data$status)
+  
+  if(stratify) {
+    # 保障最小样本逻辑
+    min_samples <- ceiling(1/(1 - train_ratio))  # 自动调整最小样本阈值
+    
+    # 分组处理
+    set.seed(seed)
+    grouped_data <- split(data, data$status)
+    
+    # 确保每个组都有可用的样本
+    if(any(sapply(grouped_data, nrow) < 2)) {
+      warning("存在事件组样本量过少，自动切换为非分层抽样")
+      stratify <- FALSE
+    }
+  }
+  
+  if(stratify) {
+    # 使用rsample包进行可靠分层分割
+    require(rsample)
+    set.seed(seed)
+    split_obj <- initial_split(data,
+                               strata = "status",
+                               prop = train_ratio,
+                               breaks = 4)  # 优化分层分箱
+    
+    train_set <- training(split_obj)
+    test_set <- testing(split_obj)
+    
+    # 打乱顺序但保持行一致性
+    train_set <- train_set[sample(nrow(train_set)), ]
+    test_set <- test_set[sample(nrow(test_set)), ]
+    
+  } else {
+    # 使用caret包创建数据分割
+    require(caret)
+    set.seed(seed)
+    train_idx <- createDataPartition(data$status, 
+                                     p = train_ratio, 
+                                     list = FALSE,
+                                     time = 1)
+    train_set <- data[train_idx, ]
+    test_set <- data[-train_idx, ]
+  }
+  
+  # 检查特征数据类型
+  type_check <- sapply(train_set, class)
+  if(any(type_check == "list")) {
+    stop("数据中存在非法list类型列，请使用asi_*函数转换")
+  }
+  
+  # 输出诊断报告
+  stratification_report <- rbind(
+    Original = prop.table(table(data$status)),
+    Training = prop.table(table(train_set$status)),
+    Testing = prop.table(table(test_set$status))
+  )
+  
+  message("数据分割完成，分层比例：\n")
+  print(round(stratification_report, 4))
+  
+  return(list(
+    train = as.data.frame(train_set),
+    test = as.data.frame(test_set),
+    report = stratification_report
+  ))
+}
+
+
+
+# # 处理list类型列的辅助函数
+# asi_convert_lists <- function(df) {
+#   df %>% 
+#     mutate(across(where(~is.list(.)), 
+#                   ~sapply(., function(x) ifelse(is.null(x), NA, unlist(x)))))
+# }
+
+
+
+###############################cox主函数####################################
+
+machine_learning_cox = function(data,
+                                seed = 123,
+                                train_percent = 0.7,
+                                n_round = 20,stratify= F,
+                                lambda_type="lambda.min",
+                                bestcut = F,
+                                topn=10){
+  
+  
+  colnames(data)[c(1,2)] = c("time","status")
+  
+  
+  # 当样本量较少时（n<100）可增加最小样本保障：
+  xx = surv_data_split(data, train_ratio= train_percent, 
+                       stratify = stratify,
+                       seed = seed)
+  
+  trainh <- xx$train
+  testh  <- xx$test
+
+  trainh =   trainh[,apply(trainh,2,var)!=0]
+  testh =   testh[,apply(testh,2,var)!=0]
+  
+  trainh[,-c(1,2)] = scale(trainh[,-c(1,2)])
+  testh[,-c(1,2)] = scale(testh[,-c(1,2)])
+  
+  # x = rfe_topn(data = trainh,topn = topn,model_type = model_type,seed = seed)
+  x = feature_selection_coxlasso(data = trainh ,seed=seed, 
+                                 n_round= n_round, topn=topn,lambda_type =lambda_type)
+  
+  
+  trainh = x$selected_matrix
+  testh =  testh[,colnames(testh) %in% colnames(trainh)]
+
+  trainh = trainh[,colnames(trainh) %in% colnames(testh)]
+  
+  write.csv(x$coef_matrix,"coef_matrix.csv")
+  write.csv(x$importance_table,file = "improtance.csv")
+  write.csv(trainh,file = "trainh.csv")
+  write.csv(testh,file = "testh.csv")
+  
+  #############################################################################
+  #############################################################################
+  ### 步骤1：使用caret训练Cox模型 ----
+  cox_ctrl <- trainControl(
+    method = "repeatedcv",
+    number = 5,
+    repeats = 3,
+    classProbs = FALSE,
+    summaryFunction = defaultSummary
+  )
+  
+  
+  # cox_model <- coxph(cox_form, data = trainh)
+  
+  x <- as.matrix(trainh[, -c(1, 2)])  # 假设前两列是时间和状态
+  y <- Surv(as.numeric(trainh$time), as.numeric(trainh$status))
+  
+  
+  tryCatch({
+    set.seed(seed)
+    # 修改点 1: 在 cv.glmnet 中显式设置 lambda.min.ratio 和减少 nlambda
+    cv_fit <- cv.glmnet(
+      x = x,                    # 特征矩阵
+      y = y,                    # Surv 对象
+      family = "cox",           # Cox 模型
+      # type.measure = "mse",       # 使用 C-index
+      nfolds = 5,               # 5 折交叉验证
+      alpha = 0.5,                # Lasso 正则化 (alpha=1)
+      #lambda.min.ratio = 0.1,   # 增大最小 lambda 比率，避免过小值导致数值不稳定
+      nlambda = 100,            # 减少 lambda 数量，避免生成过多小 lambda
+      maxit = 1e5               # 增加最大迭代次数确保收敛
+    )
+    
+    # 查看最佳 lambda 值
+    best_lambda <- cv_fit$lambda.min
+    
+    # 修改点 2: 在 glmnet 中保持参数一致性（无需重复指定 lambda.min.ratio）
+    cox_model <- glmnet(x = x,
+                        y = y,
+                        family = "cox",
+                        lambda = best_lambda,     # 直接使用交叉验证得到的最佳 lambda
+                        alpha = 0.5,                # 保持与 cv.glmnet 一致的 alpha
+                        maxit = 1e5               # 与 cv.glmnet 相同的迭代次数
+                        
+    )
+    
+    # 查看模型系数
+    # print(coef(cox_model))
+    
+    risk_score_trainh <-  predict(cox_model, newx = as.matrix(trainh[,-c(1,2)]), s = "lambda.min",type = "response")
+    
+    data_train_result = cbind(trainh[,c(1,2)],risk_score_trainh)
+    
+    colnames(data_train_result)[3] = "risk_score"
+    
+    # 在测试集上预测风险评分
+    risk_score_test <- predict(cox_model, newx = as.matrix(testh[,-c(1,2)]), s = "lambda.min",type = "response")
+    
+    
+    data_test_result = cbind(testh[,c(1,2)],risk_score_test)
+    colnames(data_test_result)[3] = "risk_score"
+    
+    # 查看风险评分
+    # head(data_train_result)
+    # head(data_test_result)
+    data_train_result$status = as.numeric(data_train_result$status)
+    data_test_result$status = as.numeric(data_test_result$status)
+    
+    data_train_result$status = data_train_result$status-1
+    data_test_result$status = data_test_result$status-1
+    ### 步骤3：确定最佳cutoff ----
+    # 需要用原始生存数据构建Surv对象
+    # train_surv <- Surv(trainh$time, trainh$status)
+    # 使用survminer确定最佳分割点
+    if (bestcut == T) {
+      
+      cut_point <- surv_cutpoint(
+        data_train_result,
+        time = "time",
+        event = "status",
+        variables = "risk_score"
+      )
+      # 查看cutoff值
+      # summary(cut_point)
+      train_optimal_cutoff <- cut_point$cutpoint[1, "cutpoint"]
+    } else{
+      train_optimal_cutoff =  median(data_train_result$risk_score)
+    }
+    
+    
+    ### 步骤4：分组绘制生存曲线 ----
+    # 创建分组变量
+    data_train_result <- data_train_result %>% 
+      mutate(risk_group = ifelse(risk_score > train_optimal_cutoff,
+                                 "High Risk",
+                                 "Low Risk"))
+    
+    # 创建生存拟合对象
+    fit <- survfit(Surv(time, status) ~ risk_group,data = data_train_result[,-3])
+    
+    require(patchwork)
+    # Kaplan-Meier曲线绘图
+    p1= ggsurvplot(
+      fit,
+      data = data_train_result[,-3],
+      pval = TRUE,            # 显示log-rank p值
+      pval.method = TRUE,     # 显示检验方法
+      conf.int = TRUE,        # 显示置信区间
+      palette = c("#E41A1C", "#377EB8"),  # 自定义颜色
+      title = "Survival Curve by Risk Group",
+      xlab = "Time (days)",   # 时间单位标签
+      #break.time.by = 100,    # 横轴刻度间隔
+      risk.table = TRUE,      # 显示风险人数表
+      risk.table.height = 0.25,  # 调整风险表高度
+      ncensor.plot = FALSE,   # 不显示删失事件图
+      legend.labs = c("High Risk", "Low Risk")  # 图例标签
+    )
+    p1_1 = p1$plot+theme(plot.margin = margin(5, 5, 5, 5))  
+    p1_2 = p1$table+theme(plot.margin = margin(5, 5, 5, 5))
+    
+    # 设置两个图的比例大小，例如，将p1的高度设置为p2的两倍
+    combined_plot <- p1_1/p1_2 + plot_layout(heights = c(2.5, 1))
+    # 导出到一张图上
+    ggsave("train_sur_plot.pdf", plot = combined_plot, width = 8, height = 10)
+    
+    
+    ### ：分组绘制生存曲线 ----
+    # 创建分组变量
+    data_test_result <-data_test_result %>% 
+      mutate(risk_group = ifelse(risk_score > train_optimal_cutoff,
+                                 "High Risk",
+                                 "Low Risk"))
+    
+    # 创建生存拟合对象
+    surv_fit <- survfit(
+      Surv(time, status) ~ risk_group,
+      data = data_test_result
+    )
+    if (length(unique(data_test_result$risk_group))>1) {
+      # Kaplan-Meier曲线绘图
+      p2 = ggsurvplot(
+        surv_fit,
+        data = data_test_result,
+        pval = TRUE,            # 显示log-rank p值
+        pval.method = TRUE,     # 显示检验方法
+        conf.int = TRUE,        # 显示置信区间
+        palette = c("#E41A1C", "#377EB8"),  # 自定义颜色
+        title = "Survival Curve by Risk Group",
+        xlab = "Time (days)",   # 时间单位标签
+        break.time.by = 100,    # 横轴刻度间隔
+        risk.table = TRUE,      # 显示风险人数表
+        risk.table.height = 0.25,  # 调整风险表高度
+        ncensor.plot = FALSE,   # 不显示删失事件图
+        legend.labs = c("High Risk", "Low Risk")  # 图例标签
+      )
+      
+      p2_1 = p2$plot+theme(plot.margin = margin(5, 5, 5, 5))  
+      p2_2 = p2$table+theme(plot.margin = margin(5, 5, 5, 5))
+      
+      # 设置两个图的比例大小，例如，将p1的高度设置为p2的两倍
+      combined_plot <- p2_1/p2_2 + plot_layout(heights = c(2.5, 1))
+      # 导出到一张图上
+      ggsave("test_sur_plot.pdf", plot = combined_plot, width = 8, height = 10)
+    }
+    
+  },error = function(e) {
+    # 打印错误信息
+    message("An error occurred: ", e$message)
+    # 可以在这里添加额外的错误处理逻辑
+  })
+  return(list(data_train_result,data_test_result))
+}
+
+###############################cox主函数-2###### 先筛选特征再分割####################################
+
+machine_learning_cox_2 = function(data,
+                                seed = 123,
+                                train_percent = 0.7,
+                                n_round = 20,stratify= F,
+                                lambda_type="lambda.min",
+                                bestcut = F,
+                                topn=10){
+  
+  
+  colnames(data)[c(1,2)] = c("time","status")
+  
+  data[,-c(1,2)] = scale(data[,-c(1,2)])
+  
+  x = feature_selection_coxlasso(data = data ,seed=seed, 
+                               n_round= n_round, topn=topn,lambda_type =lambda_type)
+  
+  data = x$selected_matrix
+
+  
+  # trainh[,-c(1,2)] = scale(trainh[,-c(1,2)])
+  # testh[,-c(1,2)] = scale(testh[,-c(1,2)])
+  
+  # 当样本量较少时（n<100）可增加最小样本保障：
+  xx = surv_data_split(data, train_ratio= train_percent, 
+                       stratify = stratify,
+                       seed = seed)
+  
+  trainh <- xx$train
+  testh  <- xx$test
+  
+  trainh =   trainh[,apply(trainh,2,var)!=0]
+  testh =   testh[,apply(testh,2,var)!=0]
+  
+  testh =  testh[,colnames(testh) %in% colnames(trainh)]
+  trainh = trainh[,colnames(trainh) %in% colnames(testh)]
+
+  
+  write.csv(x$coef_matrix,"coef_matrix.csv")
+  write.csv(x$importance_table,file = "improtance.csv")
+  write.csv(trainh,file = "trainh.csv")
+  write.csv(testh,file = "testh.csv")
+  
+  #############################################################################
+  #############################################################################
+  ### 步骤1：使用caret训练Cox模型 ----
+  cox_ctrl <- trainControl(
+    method = "repeatedcv",
+    number = 5,
+    repeats = 3,
+    classProbs = FALSE,
+    summaryFunction = defaultSummary
+  )
+  
+  
+  # cox_model <- coxph(cox_form, data = trainh)
+  
+  x <- as.matrix(trainh[, -c(1, 2)])  # 假设前两列是时间和状态
+  y <- Surv(as.numeric(trainh$time), as.numeric(trainh$status))
+  
+  
+  tryCatch({
+    set.seed(seed)
+    # 修改点 1: 在 cv.glmnet 中显式设置 lambda.min.ratio 和减少 nlambda
+    cv_fit <- cv.glmnet(
+      x = x,                    # 特征矩阵
+      y = y,                    # Surv 对象
+      family = "cox",           # Cox 模型
+      # type.measure = "mse",       # 使用 C-index
+      nfolds = 5,               # 5 折交叉验证
+      alpha = 0.5,                # Lasso 正则化 (alpha=1)
+      #lambda.min.ratio = 0.1,   # 增大最小 lambda 比率，避免过小值导致数值不稳定
+      nlambda = 100,            # 减少 lambda 数量，避免生成过多小 lambda
+      maxit = 1e5               # 增加最大迭代次数确保收敛
+    )
+    
+    # 查看最佳 lambda 值
+    best_lambda <- cv_fit$lambda.min
+    
+    # 修改点 2: 在 glmnet 中保持参数一致性（无需重复指定 lambda.min.ratio）
+    cox_model <- glmnet(x = x,
+                        y = y,
+                        family = "cox",
+                        lambda = best_lambda,     # 直接使用交叉验证得到的最佳 lambda
+                        alpha = 0.5,                # 保持与 cv.glmnet 一致的 alpha
+                        maxit = 1e5               # 与 cv.glmnet 相同的迭代次数
+                        
+    )
+    
+    # 查看模型系数
+    # print(coef(cox_model))
+    
+    risk_score_trainh <-  predict(cox_model, newx = as.matrix(trainh[,-c(1,2)]), s = "lambda.min",type = "response")
+    
+    data_train_result = cbind(trainh[,c(1,2)],risk_score_trainh)
+    
+    colnames(data_train_result)[3] = "risk_score"
+    
+    # 在测试集上预测风险评分
+    risk_score_test <- predict(cox_model, newx = as.matrix(testh[,-c(1,2)]), s = "lambda.min",type = "response")
+    
+    
+    data_test_result = cbind(testh[,c(1,2)],risk_score_test)
+    colnames(data_test_result)[3] = "risk_score"
+    
+    # 查看风险评分
+    # head(data_train_result)
+    # head(data_test_result)
+    data_train_result$status = as.numeric(data_train_result$status)
+    data_test_result$status = as.numeric(data_test_result$status)
+    
+    data_train_result$status = data_train_result$status-1
+    data_test_result$status = data_test_result$status-1
+    ### 步骤3：确定最佳cutoff ----
+    # 需要用原始生存数据构建Surv对象
+    # train_surv <- Surv(trainh$time, trainh$status)
+    # 使用survminer确定最佳分割点
+    if (bestcut == T) {
+      
+      cut_point <- surv_cutpoint(
+        data_train_result,
+        time = "time",
+        event = "status",
+        variables = "risk_score"
+      )
+      # 查看cutoff值
+      # summary(cut_point)
+      train_optimal_cutoff <- cut_point$cutpoint[1, "cutpoint"]
+    } else{
+      train_optimal_cutoff =  median(data_train_result$risk_score)
+    }
+    
+    
+    ### 步骤4：分组绘制生存曲线 ----
+    # 创建分组变量
+    data_train_result <- data_train_result %>% 
+      mutate(risk_group = ifelse(risk_score > train_optimal_cutoff,
+                                 "High Risk",
+                                 "Low Risk"))
+    
+    # 创建生存拟合对象
+    fit <- survfit(Surv(time, status) ~ risk_group,data = data_train_result[,-3])
+    
+    require(patchwork)
+    # Kaplan-Meier曲线绘图
+    p1= ggsurvplot(
+      fit,
+      data = data_train_result[,-3],
+      pval = TRUE,            # 显示log-rank p值
+      pval.method = TRUE,     # 显示检验方法
+      conf.int = TRUE,        # 显示置信区间
+      palette = c("#E41A1C", "#377EB8"),  # 自定义颜色
+      title = "Survival Curve by Risk Group",
+      xlab = "Time (days)",   # 时间单位标签
+      #break.time.by = 100,    # 横轴刻度间隔
+      risk.table = TRUE,      # 显示风险人数表
+      risk.table.height = 0.25,  # 调整风险表高度
+      ncensor.plot = FALSE,   # 不显示删失事件图
+      legend.labs = c("High Risk", "Low Risk")  # 图例标签
+    )
+    p1_1 = p1$plot+theme(plot.margin = margin(5, 5, 5, 5))  
+    p1_2 = p1$table+theme(plot.margin = margin(5, 5, 5, 5))
+    
+    # 设置两个图的比例大小，例如，将p1的高度设置为p2的两倍
+    combined_plot <- p1_1/p1_2 + plot_layout(heights = c(2.5, 1))
+    # 导出到一张图上
+    ggsave("train_sur_plot.pdf", plot = combined_plot, width = 8, height = 10)
+    
+    
+    ### ：分组绘制生存曲线 ----
+    # 创建分组变量
+    data_test_result <-data_test_result %>% 
+      mutate(risk_group = ifelse(risk_score > train_optimal_cutoff,
+                                 "High Risk",
+                                 "Low Risk"))
+    
+    # 创建生存拟合对象
+    surv_fit <- survfit(
+      Surv(time, status) ~ risk_group,
+      data = data_test_result
+    )
+    if (length(unique(data_test_result$risk_group))>1) {
+      # Kaplan-Meier曲线绘图
+      p2 = ggsurvplot(
+        surv_fit,
+        data = data_test_result,
+        pval = TRUE,            # 显示log-rank p值
+        pval.method = TRUE,     # 显示检验方法
+        conf.int = TRUE,        # 显示置信区间
+        palette = c("#E41A1C", "#377EB8"),  # 自定义颜色
+        title = "Survival Curve by Risk Group",
+        xlab = "Time (days)",   # 时间单位标签
+        break.time.by = 100,    # 横轴刻度间隔
+        risk.table = TRUE,      # 显示风险人数表
+        risk.table.height = 0.25,  # 调整风险表高度
+        ncensor.plot = FALSE,   # 不显示删失事件图
+        legend.labs = c("High Risk", "Low Risk")  # 图例标签
+      )
+      
+      p2_1 = p2$plot+theme(plot.margin = margin(5, 5, 5, 5))  
+      p2_2 = p2$table+theme(plot.margin = margin(5, 5, 5, 5))
+      
+      # 设置两个图的比例大小，例如，将p1的高度设置为p2的两倍
+      combined_plot <- p2_1/p2_2 + plot_layout(heights = c(2.5, 1))
+      # 导出到一张图上
+      ggsave("test_sur_plot.pdf", plot = combined_plot, width = 8, height = 10)
+    }
+    
+  },error = function(e) {
+    # 打印错误信息
+    message("An error occurred: ", e$message)
+    # 可以在这里添加额外的错误处理逻辑
+  })
+  return(list(data_train_result,data_test_result))
+}
+
+
+
+
+
+
+# 批量执行函数X的循环函数
+batch_execute_cox <- function(data,N,seed = NULL,topn = 10,stratify = F,
+                              lambda_type ="lambda.min",version = 2,
+                              n_round = 20,bestcut = F,
+                            train_percent=0.7) {
+  
+  random_seed <- seed
+  # 循环生成N个随机种子并执行函数X
+  for (i in seq_along(random_seed)) {
+    
+    # 创建以随机种子命名的文件夹
+    seed_folder <- paste0(i,"、seed=",random_seed[i])
+    if (!dir.exists(seed_folder)) {
+      dir.create(seed_folder)
+    }
+    setwd(seed_folder)
+    
+    # 调用函数X并获取结果
+    if (version == 2) {
+      result <- machine_learning_cox_2(data = data, bestcut = bestcut,
+                                     lambda_type = lambda_type,
+                                     # seed = seed,
+                                     stratify=stratify,
+                                     seed = random_seed[i],
+                                     topn = topn,n_round = n_round,
+                                     train_percent =train_percent)
+    }else {
+      result <- machine_learning_cox(data = data, bestcut = bestcut,
+                                     lambda_type = lambda_type,
+                                     # seed = seed,
+                                     stratify=stratify,
+                                     seed = random_seed[i],
+                                     topn = topn,n_round = n_round,
+                                     train_percent =train_percent)
+    }
+    
+    
+    tryCatch({
+      out1 = result[[1]]
+      out2 = result[[2]]
+      
+      write.csv(x = out1,file = "data_train_result.csv")
+      write.csv(x = out2,file = "data_test_result.csv")
+    },error = function(e) {
+      # 打印错误信息
+      message("An error occurred: ", e$message)
+      # 可以在这里添加额外的错误处理逻辑
+    })
+
+    
+    # 打印进度信息
+    cat("Completed for seed", random_seed[i], "\n")
+    setwd("../")
+  }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+####################上面是COX模型#######################################################
+
+
+
+
+####################下面是分类模型#######################################################
+
+###########################################################################
+
+##rf特征筛选
+feature_selection_rf <- function(data, seed=123, n_round=20, topn=10, importance_type=2) {
+  # 参数说明：
+  # data: 数据框或矩阵，第一列为分组变量
+  # seed: 随机种子，控制可重复性
+  # n_round: 重采样轮次
+  # topn: 保留的顶级特征数
+  # importance_type: 重要性类型（1=准确率下降，2=Gini下降）
+  
+  set.seed(seed)
+  group_col <- 1
+  X <- data[, -group_col, drop = FALSE]
+  y <- as.factor(data[, group_col])
+  
+  importance_matrix <- matrix(0, nrow = n_round, ncol = ncol(X))
+  colnames(importance_matrix) <- colnames(X)
+  
+  for (i in 1:n_round) {
+    # 分层Bootstrap抽样（保持类别比例）
+    indices_by_class <- split(1:nrow(X), y)
+    sampled_indices <- unlist(lapply(indices_by_class, function(ind) {
+      sample(ind, size = length(ind), replace = TRUE)
+    }))
+    
+    X_sample <- X[sampled_indices, , drop = FALSE]
+    y_sample <- y[sampled_indices]
+    
+    # 训练模型（可调整随机森林超参数）
+    rf_model <- randomForest::randomForest(
+      x = X_sample,
+      y = y_sample,
+      importance = TRUE,
+      ntree = 500  # 增加树的数量以提高稳定性
+    )
+    
+    # 记录重要性并标准化
+    imp <- randomForest::importance(rf_model, type = importance_type)[, 1]
+    importance_matrix[i, ] <- imp / sum(imp)  # 归一化处理
+  }
+  
+  avg_importance <- colMeans(importance_matrix)
+  ranked_features <- names(sort(avg_importance, decreasing = TRUE))[1:topn]
+  
+  # 构建结果（保留原始数据，仅筛选特征）
+  selected_data <- cbind(data[, group_col, drop = FALSE], X[, ranked_features, drop = FALSE])
+  colnames(selected_data)[1] <- "group"
+  
+  importance_table <- data.frame(
+    Feature = names(avg_importance),
+    Importance = avg_importance,
+    Rank = rank(-avg_importance, ties.method = "min")
+  )[order(-avg_importance), ]
+  rownames(importance_table) <- NULL
+  
+  return(list(
+    selected_matrix = selected_data,
+    importance_table = importance_table
+  ))
+}
+
+
+
+
+
+
+#####快速交叉验证和模型测试
+####整合机器学习分析函数
+machine_learning = function(data,seed = 123,group_name=1,train_percent = 0.7,n_round = 20,
+                            topn=10){
+  colnames(data)[group_name] = "group"
+  data$group = factor(data$group)
+  ##分割数据
+  set.seed(seed)
+  indexh <- createDataPartition(data[,"group"],p = train_percent,list = F)
+  trainh <- data[indexh,]
+  testh  <- data[-indexh,]
+  
+  
+  # str(trainh)
+  # str(testh)
+  # x = rfe_topn(data = trainh,topn = topn,model_type = model_type,seed = seed)
+  x = feature_selection_rf(data = trainh ,seed=seed, n_round=n_round, topn=topn)
+  
+  
+  trainh = x$selected_matrix
+  testh =  testh[,colnames(testh) %in% colnames(trainh)]
+  
+  write.csv(x$importance_table,file = "improtance.csv")
+  write.csv(trainh,file = "trainh.csv")
+  write.csv(testh,file = "testh.csv")
+  
+  data_auc = data.frame(auc = c(rep(0,4)),row.names = c("glmnet","svm","rf","nnet"))
+  set.seed(seed)
+  m1h <-  train(group~., #因变量为group，自变量是除了group外的所有其它指标，使用group~.来表示关系
+                data = trainh, #使用训练集进行训练
+                method = "glmnet",#glm代表广义线性模型   glmnet是基于正则化的逻辑回归防止过拟合 
+                preProcess = c("scale", "center"),#自带数据标准化参数
+                tuneGrid = data.frame(alpha = c(0,0.001,0.01,0.05,0.1,0.15),lambda = c(0,0.001,0.01,0.05,0.1,0.15)),
+                #trControl为caret自带的模型训练控制参数，包含交叉验证、输出类型等参数，不同模型不一样
+                trControl = trainControl(classProbs = T,
+                                         method = "repeatedcv",
+                                         number=10, 
+                                         verboseIter = T,
+                                         repeats=5
+                ))
+  glm_best_tune = m1h$bestTune
+  
+  best_lambda <- m1h$bestTune$lambda
+  best_alpha <- m1h$bestTune$alpha
+  
+  # 获取最佳模型的系数
+  best_coefficients <- as.data.frame(as.matrix(coef(m1h$finalModel, s = best_lambda)))
+  write.csv( best_coefficients,"glmnet_model_coef.csv")
+  #预测
+  testh_pred <- predict(m1h,testh, type = "prob")
+  write.csv(testh_pred,"glmnet_predict.csv")
+  #绘制ROC
+  pdf(file = "1、glm_model_roc.pdf",width = 8,height = 8)
+  roc1 <- plot.roc(as.factor(testh$group),testh_pred[,unique(testh$group)[1]],percent=TRUE,col="#1c61b6",print.auc=T,
+                   main = "Area under the curve for Logistic Regression(glmnet)",print.thres="best")
+  dev.off()
+  glm_roc = round(as.numeric(sub(".*:", "", roc1$auc))/100,digits = 3)
+  
+  data_auc["glmnet",] = glm_roc
+  
+  
+  
+  sumroc = roc1$sensitivities+roc1$specificities
+  cutvalue = roc1$thresholds[which(sumroc == max(sumroc))]
+  glm_pred = ifelse(testh_pred[,unique(testh$group)[1]] > cutvalue,as.character(unique(testh$group)[1]),as.character(unique(testh$group)[2]))
+  glm_conf_matr = as.matrix(caret::confusionMatrix(factor(glm_pred),testh$group))
+  
+  pdf(file = "1、glm_conf_heatmap.pdf",width = 7,height = 7)
+  pheatmap::pheatmap(glm_conf_matr,display_numbers = T,fontsize = 15,
+                     cluster_rows = F,cluster_cols = F,
+                     show_colnames = T,show_rownames = T,
+  )
+  dev.off()
+  
+  
+  # 
+  #基于k折交叉验证的模型训练,线性SVM
+  set.seed(seed)
+  svm1 <- train(group~., 
+                data = trainh, 
+                method = "svmLinear",
+                metric = "Accuracy",
+                tuneGrid = data.frame(C = c(0.01,0.1,0.2,0.3,0.4,0.5,1)),
+                preProcess = c("scale", "center"),
+                trControl = trainControl(classProbs = T,
+                                         method="repeatedcv",
+                                         number=10, 
+                                         verboseIter = T,
+                                         repeats=5,
+                ))
+  
+  svm_best_tune = svm1$bestTune
+  
+  best_C_svm <- svm1$bestTune$C
+  
+  
+  
+  
+  # 获取模型的指标重要性的评价
+  importance <- data.frame(row.names = row.names(varImp(svm1)$importance),improtance = varImp(svm1)$importance[,1] )
+  
+  write.csv(importance,"svm_ importance.csv")
+  
+  # svm_param = summary(svm1)
+  #svm1$finalModel
+  #预测
+  pred_svmh <- predict(svm1, testh,type ="prob")
+  write.csv(pred_svmh,"svm_predict.csv")
+  #View(pred_svmh)
+  pdf(file = "2、svm_model_roc.pdf",width = 8,height = 8)
+  roc2 <- plot.roc(as.factor(testh$group),pred_svmh[,unique(testh$group)[1]], percent=TRUE,col="#1c61b6", print.auc=TRUE,
+                   main = "Area under the curve for SVM",print.thres="best")
+  dev.off()
+  
+  svm_roc = round(as.numeric(sub(".*:", "", roc2$auc))/100,digits = 3)
+  
+  data_auc["svm",] = svm_roc
+  
+  
+  sumroc2 = roc2$sensitivities+roc2$specificities
+  cutvalue = roc2$thresholds[which(sumroc2 == max(sumroc2))]
+  svm_pred = ifelse(testh_pred[,unique(testh$group)[1]] > cutvalue,as.character(unique(testh$group)[1]),as.character(unique(testh$group)[2]))
+  svm_conf_matr = as.matrix(caret::confusionMatrix(factor(svm_pred),testh$group)) 
+  
+  pdf(file = "2、svm_conf_heatmap.pdf",width = 7,height = 7)
+  pheatmap::pheatmap(svm_conf_matr,display_numbers = T,fontsize = 15,
+                     cluster_rows = F,cluster_cols = F,
+                     show_colnames = T,show_rownames = T,
+  )
+  dev.off()
+  
+  ######RF
+  set.seed(seed)
+  
+  if (topn >= 20) {
+    mtryx <- c(1, 2, 3, 4, 5, 6, 10, 20)
+  } else if (topn > 5) {
+    mtryx <- c(1, 2, 3, 4, 5, 6, 10)
+  } else {
+    mtryx <- c(1, 2, 3)
+  }
+  
+  model_rfh <- train(group~.,
+                     data = trainh,
+                     method = "rf",
+                     tuneGrid = data.frame(mtry = mtryx),
+                     preProcess = c("scale", "center"), 
+                     trControl = trainControl(method = "repeatedcv", 
+                                              number = 10, 
+                                              repeats = 5, 
+                                              savePredictions = TRUE, 
+                                              verboseIter = T,
+                                              classProbs = T))
+  rf_best_tune = model_rfh$bestTune
+  
+  # 获取模型的指标重要性的评价
+  importance <- data.frame(row.names = row.names(varImp(model_rfh)$importance),improtance = varImp(model_rfh)$importance[,1] )
+  
+  write.csv(importance,"rf_ importance.csv")
+  
+  
+  
+  # plot(model_rfh)
+  #预测
+  pred_rfh <- predict(model_rfh, testh,type ="prob")
+  write.csv(pred_rfh,"rf_predict.csv")
+  #ROC曲线
+  pdf(file = "3、rf_model_roc.pdf",width = 8,height = 8)
+  roc3 <- plot.roc(testh$group,pred_rfh[,unique(testh$group)[1]], percent=TRUE,col="#1c61b6", print.auc=TRUE,
+                   main = "Area under the curve for Random Forest",print.thres="best")
+  dev.off()
+  
+  rf_roc = round(as.numeric(sub(".*:", "", roc3$auc))/100,digits = 3)
+  
+  data_auc["rf",] = rf_roc 
+  # ####
+  # rf_roc = round(as.numeric(sub(".*:", "", roc3$auc))/100,digits = 3)
+  
+  sumroc3 = roc3$sensitivities+roc3$specificities
+  cutvalue = roc3$thresholds[which(sumroc3 == max(sumroc3))]
+  rf_pred = ifelse(pred_rfh[,unique(testh$group)[1]] > cutvalue,as.character(unique(testh$group)[1]),as.character(unique(testh$group)[2]))
+  rf_conf_matr = as.matrix(caret::confusionMatrix(factor(rf_pred),testh$group)) 
+  
+  pdf(file = "3、rf_conf_heatmap.pdf",width = 7,height = 7)
+  pheatmap::pheatmap(rf_conf_matr,display_numbers = T,fontsize = 15,
+                     cluster_rows = F,cluster_cols = F,
+                     show_colnames = T,show_rownames = T)
+  dev.off()
+  
+  ####nnet
+  set.seed(seed)
+  model_nneth <- caret::train(group ~ .,
+                              data = trainh,
+                              method = "nnet",
+                              tuneGrid = data.frame(size = c(1,3,5,10,15,20,50),decay = c(0.00001,0.0001,0.001,0.01,0.1,1,5)),
+                              preProcess = c("scale", "center"),
+                              trControl = trainControl(method = "repeatedcv", 
+                                                       number = 10, 
+                                                       classProbs = T,
+                                                       repeats = 5, 
+                                                       savePredictions = TRUE, 
+                                                       verboseIter = FALSE))
+  
+  nnet_bset_tune = model_nneth$bestTune
+  
+  importance <- data.frame(row.names = row.names(varImp(model_nneth)$importance),
+                           improtance = varImp(model_nneth)$importance[,1] )
+  
+  write.csv(importance,"nnet_importance.csv")
+  
+  
+  
+  pred_ann <- predict(model_nneth,testh,type = "prob")
+  write.csv(pred_ann,"nnet_predict.csv")
+  #绘制ROC
+  pdf(file = "4、nnet_model_roc.pdf",width = 8,height = 8)
+  roc4 <-  plot.roc(testh$group,pred_ann[,unique(testh$group)[1]], percent=TRUE,col="#1c61b6", print.auc=TRUE,
+                    print.thres =T,main = "Area under the curve for neural networks")
+  dev.off()
+  nnet_roc = round(as.numeric(sub(".*:", "", roc4$auc))/100,digits = 3)
+  
+  data_auc["nnet",] = nnet_roc 
+  
+  # ####
+  # nnet_roc = round(as.numeric(sub(".*:", "", roc4$auc))/100,digits = 3)
+  
+  sumroc4 = roc4$sensitivities+roc4$specificities
+  cutvalue = roc4$thresholds[which(sumroc4 == max(sumroc4))]
+  nnet_pred = ifelse(pred_ann[,unique(testh$group)[1]] > cutvalue,as.character(unique(testh$group)[1]),as.character(unique(testh$group)[2]))
+  nnet_conf_matr = as.matrix(caret::confusionMatrix(factor(nnet_pred),testh$group)) 
+  
+  pdf(file = "4、nnet_conf_heatmap.pdf",width = 7,height = 7)
+  pheatmap::pheatmap(nnet_conf_matr,display_numbers = T,fontsize = 15,
+                     cluster_rows = F,cluster_cols = F,
+                     show_colnames = T,show_rownames = T,
+  )
+  dev.off()
+  
+  
+  #绘制合并ROC
+  pdf(file = "5、model_roc_combine.pdf",width = 8,height = 8)
+  roc1 <- plot.roc(as.factor(testh$group),testh_pred[,unique(testh$group)[1]],percent=TRUE,col="#E41A1C",print.auc=F,
+                   main = "Area under the curve for different model")
+  plot(roc2,col="#377EB8",add = T)
+  plot(roc3,col="#4DAF4A",add = T)
+  plot(roc4,col="#984EA3",add = T)
+  
+  text.legend <- c(paste0("Logistic AUC:",glm_roc),paste0("SVM AUC:",svm_roc),
+                   paste0("Random Forest AUC:",rf_roc),paste0("Nnet AUC:",nnet_roc))
+  col.legend  <- c("#E41A1C","#377EB8","#4DAF4A","#984EA3")
+  legend("bottomright",pch=c(20,20,20,20),legend=text.legend,cex = 1.2,
+         col=col.legend,bty="n",horiz=F)
+  dev.off()
+  
+  ###导出最佳模型参数
+  xlsx::write.xlsx(glm_best_tune,file = "param.xlsx",sheetName = "glmnet",row.names = F)
+  xlsx::write.xlsx(svm_best_tune,file = "param.xlsx",sheetName = "svm",row.names = F,append = T)
+  xlsx::write.xlsx(rf_best_tune,file = "param.xlsx",sheetName = "rf",row.names = F,append = T)
+  xlsx::write.xlsx(nnet_bset_tune,file = "param.xlsx",sheetName = "nnet",row.names = F,append = T)
+  
+  return(data_auc)
+}
+
+
+
+# 批量执行函数X的循环函数
+batch_execute_X <- function(expression_matrix,N,seed = 123,topn = 10,n_round = 20,
+                            train_percent=0.7,group_name = 1) {
+  
+  data_seed = data.frame(matrix(nrow = 4,ncol =  N))
+  row.names(data_seed) = c( "glmnet","svm","rf","nnet"  )
+  
+  set.seed(seed)
+  random_seed <- sample(1:10000,N )
+  # 循环生成N个随机种子并执行函数X
+  for (i in seq_along(random_seed)) {
+    
+    # 生成随机种子
+    colnames(data_seed)[i] = paste0("seed_",random_seed[i])
+    
+    # 创建以随机种子命名的文件夹
+    seed_folder <- paste0(i,"、seed=",random_seed[i])
+    if (!dir.exists(seed_folder)) {
+      dir.create(seed_folder)
+    }
+    setwd(seed_folder)
+    
+    # 调用函数X并获取结果
+    result <- machine_learning(data = expression_matrix, 
+                               seed = random_seed[i],group_name = group_name
+                               ,topn = topn,n_round =n_round,
+                               train_percent =train_percent)
+    
+    data_seed[,i] = result[,1]
+    
+    # 打印进度信息
+    cat("Completed for seed", random_seed[i], "\n")
+    setwd("../")
+  }
+  
+  data_seed$average = apply(data_seed,1,mean)
+  write.csv(x = data_seed,file = "total_auc_result.csv")
+}
+
+
+
+################################################################
+# feature_selection_rf <- function(data, seed=123, n_round=20, topn=10) {
+#   # 参数说明：
+#   # data: 包含特征和最后一列分组信息的数据框或矩阵
+#   # seed: 随机种子
+#   # n_round: 抽样轮次
+#   # topn: 最终筛选保留的特征数量
+#   
+#   # 设置随机种子保证结果可重复
+#   set.seed(seed)
+#   
+#   # 分离特征矩阵和分组信息（假设第一列为分组）
+#   group_col <- 1
+#   X <- data[, -group_col, drop = FALSE]
+#   y <- as.factor(data[, group_col])
+#   
+#   # 初始化特征重要性存储矩阵
+#   importance_matrix <- matrix(0, nrow = n_round, ncol = ncol(X))
+#   colnames(importance_matrix) <- colnames(X)
+#   
+#   # 进行多轮特征重要性计算
+#   for (i in 1:n_round) {
+#     # 分层Bootstrap抽样（保持类别比例）
+#     indices_by_class <- split(1:nrow(X), y)
+#     sampled_indices <- unlist(lapply(indices_by_class, function(ind) {
+#       sample(ind, size = length(ind), replace = TRUE)
+#     }))
+#     
+#     # 创建抽样数据集
+#     X_sample <- X[sampled_indices, , drop = FALSE]
+#     y_sample <- y[sampled_indices]
+#     
+#     # 训练随机森林模型
+#     rf_model <- randomForest::randomForest(
+#       x = X_sample,
+#       y = y_sample,
+#       importance = TRUE
+#     )
+#     
+#     # 记录特征重要性（使用Gini指数）
+#     imp <- randomForest::importance(rf_model, type = 2)
+#     importance_matrix[i, ] <- imp
+#   }
+#   
+#   # 计算平均特征重要性
+#   avg_importance <- colMeans(importance_matrix)
+#   
+#   # 按重要性排序并选择topn特征
+#   ranked_features <- names(sort(avg_importance, decreasing = TRUE))[1:topn]
+#   
+#   # 构建结果数据集和重要性表格
+#   selected_data <- X[, ranked_features, drop = FALSE]
+#   selected_data = cbind(data[,group_col],selected_data)
+#   colnames(selected_data)[1] = "group"
+#   
+#   
+#   importance_table <- data.frame(
+#     Feature = names(avg_importance),
+#     Importance = avg_importance,
+#     stringsAsFactors = FALSE
+#   )
+#   importance_table <- importance_table[order(-importance_table$Importance), ]
+#   rownames(importance_table) <- NULL
+#   
+#   # 返回结果列表
+#   return(list(
+#     # importance_matrix,
+#     selected_matrix = selected_data,
+#     importance_table = importance_table
+#   ))
+# }
+
+# 
+# xx = feature_selection_rf(data = data3)
+# 
+# View(xx$selected_matrix)
+# View(xx$importance_table)
+
+
+
+

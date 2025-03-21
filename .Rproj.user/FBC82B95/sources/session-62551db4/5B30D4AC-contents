@@ -1,0 +1,47 @@
+#创建封装R包流程参考网址：http://personalbioinformatics.blogspot.com/2019/01/r.html
+
+##step1 新建一个project 选择package类型，在项目文件夹下删除NAMESPACE文件及main文件夹
+setwd("C:\\Users\\wayen\\Desktop\\pathway network/")
+##step2 将R函数保存到项目文件夹的R文件下，并赋值以下内容到函数的上方，其中#' @import为需要的导入的包，空格分割
+#函数文件不需要library包，中#' @import后写上就行,包的名称之间空格间隔
+
+#' @title luminex caculate
+#' @description Creating dynamic algorithm to solve knapsack problem.
+#' @details Input takes a data.frame x with two variables v and w and returns the maximum knapsack value and which elements (rows in the data.frame).
+#' @param data_raw,data_nd,compare_data,data_dilution,group
+#' @return A list with the maximum knapsack value and which elements.
+#' @export
+#' @import ggplot2 ggpubr ggsignif RColorBrewer dplyr ggord ggrepel
+#' @examples
+
+setwd("C:/Users/admin/Desktop/代码及开发/MLpack/")
+##step3 将依赖包导入到DESCRIPTION文件中，使用以下函数，每个包都要导入一下
+##ggplot2 ggpubr ggsignif RColorBrewer dplyr ggord ggrepel
+
+
+library(caret)
+library(pROC)
+library(tidyverse)
+library(survival)
+library(survminer)
+library(glmnet)  # 需要安装用于Cox模型
+library(patchwork)
+
+# 'pheatmap', 'randomForest', 'rsample', 'xlsx'
+
+setwd("C:/Users/admin/Desktop/代码及开发/MLpack/")
+usethis::use_package(package = "xlsx",type = "Imports",min_version = NULL)
+
+
+
+##step4 设置工作目录为新建的项目文件夹下，并运行一下代码生成MAIN和NAMESPACE文件，注意函数代码中不能有中文
+roxygen2::roxygenize(package.dir = ".")
+
+##step5 devtools::check()检查问题，一般的warning及note问题不大，主要是错误的排除
+devtools::check()
+
+##step6 devtools::build() 创建包
+devtools::build()
+
+
+
