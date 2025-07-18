@@ -486,6 +486,8 @@ machine_learning_cox = function(data,
   return(list(data_train_result,data_test_result))
 }
 
+
+
 #' Machine Learning Pipeline for Cox Proportional Hazards Model (Alternative Version)
 #'
 #' An alternative implementation of the survival analysis pipeline using Cox proportional hazards model with Elastic Net regularization.
@@ -923,7 +925,7 @@ machine_learning = function(data, seed = 123, group_name = 1, train_percent = 0.
   write.csv(testh_pred, "glmnet_predict.csv")
   # Plot ROC
   pdf(file = "1、glm_model_roc.pdf", width = 8, height = 8)
-  roc1 <- plot.roc(as.factor(testh$group), testh_pred[, unique(testh$group)[1]], percent = TRUE, col = "#1c61b6", print.auc = T,
+  roc1 <- plot.roc(as.factor(testh$group), testh_pred[, 1], percent = TRUE, col = "#1c61b6", print.auc = T,
                    main = "Area under the curve for Logistic Regression(glmnet)", print.thres = "best")
   dev.off()
   glm_roc = round(as.numeric(sub(".*:", "", roc1$auc)) / 100, digits = 3)
@@ -932,7 +934,7 @@ machine_learning = function(data, seed = 123, group_name = 1, train_percent = 0.
 
   sumroc = roc1$sensitivities + roc1$specificities
   cutvalue = roc1$thresholds[which(sumroc == max(sumroc))]
-  glm_pred = ifelse(testh_pred[, unique(testh$group)[1]] > cutvalue, as.character(unique(testh$group)[1]), as.character(unique(testh$group)[2]))
+  glm_pred = ifelse(testh_pred[, 1] > cutvalue, as.character(unique(testh$group)[1]), as.character(unique(testh$group)[2]))
   glm_conf_matr = as.matrix(caret::confusionMatrix(factor(glm_pred), testh$group))
 
   pdf(file = "1、glm_conf_heatmap.pdf", width = 7, height = 7)
@@ -983,7 +985,7 @@ machine_learning = function(data, seed = 123, group_name = 1, train_percent = 0.
 
   sumroc2 = roc2$sensitivities + roc2$specificities
   cutvalue = roc2$thresholds[which(sumroc2 == max(sumroc2))]
-  svm_pred = ifelse(testh_pred[, unique(testh$group)[1]] > cutvalue, as.character(unique(testh$group)[1]), as.character(unique(testh$group)[2]))
+  svm_pred = ifelse(testh_pred[, 1] > cutvalue, as.character(unique(testh$group)[1]), as.character(unique(testh$group)[2]))
   svm_conf_matr = as.matrix(caret::confusionMatrix(factor(svm_pred), testh$group))
 
   pdf(file = "2、svm_conf_heatmap.pdf", width = 7, height = 7)
@@ -1097,7 +1099,7 @@ machine_learning = function(data, seed = 123, group_name = 1, train_percent = 0.
 
   # Plot combined ROC
   pdf(file = "5、model_roc_combine.pdf", width = 8, height = 8)
-  roc1 <- plot.roc(as.factor(testh$group), testh_pred[, unique(testh$group)[1]], percent = TRUE, col = "#E41A1C", print.auc = F,
+  roc1 <- plot.roc(as.factor(testh$group), testh_pred[, 1], percent = TRUE, col = "#E41A1C", print.auc = F,
                    main = "Area under the curve for different models")
   plot(roc2, col = "#377EB8", add = T)
   plot(roc3, col = "#4DAF4A", add = T)
@@ -1116,7 +1118,7 @@ machine_learning = function(data, seed = 123, group_name = 1, train_percent = 0.
   xlsx::write.xlsx(rf_best_tune, file = "param.xlsx", sheetName = "rf", row.names = F, append = T)
   xlsx::write.xlsx(nnet_bset_tune, file = "param.xlsx", sheetName = "nnet", row.names = F, append = T)
 
-  return(data_auc)
+  return(list(data_auc,m1h,svm1,model_rfh,model_nneth))
 }
 
 
@@ -1206,7 +1208,7 @@ machine_learning2 = function(data, seed = 123, group_name = 1, train_percent = 0
   write.csv(testh_pred, "glmnet_predict.csv")
   # Plot ROC
   pdf(file = "1、glm_model_roc.pdf", width = 8, height = 8)
-  roc1 <- plot.roc(as.factor(testh$group), testh_pred[, unique(testh$group)[1]], percent = TRUE, col = "#1c61b6", print.auc = T,
+  roc1 <- plot.roc(as.factor(testh$group), testh_pred[, 1], percent = TRUE, col = "#1c61b6", print.auc = T,
                    main = "Area under the curve for Logistic Regression(glmnet)", print.thres = "best")
   dev.off()
   glm_roc = round(as.numeric(sub(".*:", "", roc1$auc)) / 100, digits = 3)
@@ -1215,7 +1217,7 @@ machine_learning2 = function(data, seed = 123, group_name = 1, train_percent = 0
 
   sumroc = roc1$sensitivities + roc1$specificities
   cutvalue = roc1$thresholds[which(sumroc == max(sumroc))]
-  glm_pred = ifelse(testh_pred[, unique(testh$group)[1]] > cutvalue, as.character(unique(testh$group)[1]), as.character(unique(testh$group)[2]))
+  glm_pred = ifelse(testh_pred[, 1] > cutvalue, as.character(unique(testh$group)[1]), as.character(unique(testh$group)[2]))
   glm_conf_matr = as.matrix(caret::confusionMatrix(factor(glm_pred), testh$group))
 
   pdf(file = "1、glm_conf_heatmap.pdf", width = 7, height = 7)
@@ -1266,7 +1268,7 @@ machine_learning2 = function(data, seed = 123, group_name = 1, train_percent = 0
 
   sumroc2 = roc2$sensitivities + roc2$specificities
   cutvalue = roc2$thresholds[which(sumroc2 == max(sumroc2))]
-  svm_pred = ifelse(testh_pred[, unique(testh$group)[1]] > cutvalue, as.character(unique(testh$group)[1]), as.character(unique(testh$group)[2]))
+  svm_pred = ifelse(testh_pred[, 1] > cutvalue, as.character(unique(testh$group)[1]), as.character(unique(testh$group)[2]))
   svm_conf_matr = as.matrix(caret::confusionMatrix(factor(svm_pred), testh$group))
 
   pdf(file = "2、svm_conf_heatmap.pdf", width = 7, height = 7)
@@ -1380,7 +1382,7 @@ machine_learning2 = function(data, seed = 123, group_name = 1, train_percent = 0
 
   # Plot combined ROC
   pdf(file = "5、model_roc_combine.pdf", width = 8, height = 8)
-  roc1 <- plot.roc(as.factor(testh$group), testh_pred[, unique(testh$group)[1]], percent = TRUE, col = "#E41A1C", print.auc = F,
+  roc1 <- plot.roc(as.factor(testh$group), testh_pred[, 1], percent = TRUE, col = "#E41A1C", print.auc = F,
                    main = "Area under the curve for different models")
   plot(roc2, col = "#377EB8", add = T)
   plot(roc3, col = "#4DAF4A", add = T)
@@ -1399,11 +1401,224 @@ machine_learning2 = function(data, seed = 123, group_name = 1, train_percent = 0
   xlsx::write.xlsx(rf_best_tune, file = "param.xlsx", sheetName = "rf", row.names = F, append = T)
   xlsx::write.xlsx(nnet_bset_tune, file = "param.xlsx", sheetName = "nnet", row.names = F, append = T)
 
-  return(data_auc)
+  return(list(data_auc,m1h,svm1,model_rfh,model_nneth))
 }
 
 
 
+
+#' Validate Machine Learning Models on Test Dataset
+#'
+#' Evaluates four machine learning models (GLM, SVM, Random Forest, Neural Network)
+#' on validation data, generating ROC curves, confusion matrices, and comparative
+#' performance visualizations.
+#'
+#' @param model List containing trained model objects. Must include:
+#' \itemize{
+#'   \item \code{m1h}: GLM model (glmnet)
+#'   \item \code{svm}: SVM model (e1071/caret)
+#'   \item \code{rf}: Random Forest model (randomForest)
+#'   \item \code{nnet}: Neural Network model (nnet)
+#' }
+#' @param validate_data Data.frame containing validation dataset with:
+#' \itemize{
+#'   \item Features matching training data structure
+#'   \item Required factor column \code{group} as response variable
+#' }
+#'
+#' @return Invisible list containing:
+#' \itemize{
+#'   \item \code{auc}: Data.frame with AUC values for each model
+#'   \item \code{confusion_matrices}: List of confusion matrices for each model
+#' }
+#'
+#' @details Generates the following output files in working directory:
+#' \itemize{
+#'   \item \strong{ROC curves}:
+#'     \itemize{
+#'       \item 1_glm_model_roc.pdf
+#'       \item 2_svm_model_roc.pdf
+#'       \item 3_rf_model_roc.pdf
+#'       \item 4_nnet_model_roc.pdf
+#'       \item 5_model_roc_combine.pdf
+#'     }
+#'   \item \strong{Confusion matrices}:
+#'     \itemize{
+#'       \item 1_glm_conf_heatmap.pdf
+#'       \item 2_svm_conf_heatmap.pdf
+#'       \item 3_rf_conf_heatmap.pdf
+#'       \item 4_nnet_conf_heatmap.pdf
+#'     }
+#'   \item \strong{Prediction probabilities}:
+#'     \itemize{
+#'       \item glmnet_predict.csv
+#'       \item svm_predict.csv
+#'       \item rf_predict.csv
+#'       \item nnet_predict.csv
+#'     }
+#' }
+#'
+#' @examples
+#' \dontrun{
+#' # After training models:
+#' models <- list(
+#'   m1h = glm_model,
+#'   svm = svm_model,
+#'   rf  = rf_model,
+#'   nnet = nnet_model
+#' )
+#'
+#' results <- validate_func(
+#'   model = models,
+#'   validate_data = test_data
+#' )
+#'
+#' # Access results:
+#' print(results$auc)
+#' print(results$confusion_matrices$glm)
+#' }
+#'
+#' @importFrom pROC plot.roc
+#' @importFrom pheatmap pheatmap
+#' @importFrom caret confusionMatrix
+#' @importFrom grDevices pdf dev.off
+#' @importFrom graphics plot legend
+#' @importFrom utils write.csv
+#' @export
+
+validate_func  = function(models,validate_data,seed){
+  for (i in seq_along(models)) {
+    model = models[[i]]
+    m1h = model["m1h"]
+    svm1 =  model["svm"]
+    model_rfh = model["rf"]
+    model_nneth = model["nnet"]
+
+    dir.create(paste0("seed_",seed[i]))
+    setwd(paste0("seed_",seed[i]))
+
+    data_auc = data.frame(auc = c(rep(0, 4)), row.names = c("glmnet", "svm", "rf", "nnet"))
+    # Prediction
+    testh_pred <- predict(m1h, validate_data, type = "prob")
+    write.csv(testh_pred, "glmnet_predict.csv")
+    # Plot ROC
+    pdf(file = "1、glm_model_roc.pdf", width = 8, height = 8)
+    roc1 <- plot.roc(as.factor(validate_data$group), testh_pred$m1h[,1], percent = TRUE, col = "#1c61b6", print.auc = T,
+                     main = "Area under the curve for Logistic Regression(glmnet)", print.thres = "best")
+    dev.off()
+    glm_roc = round(as.numeric(sub(".*:", "", roc1$auc)) / 100, digits = 3)
+
+    data_auc["glmnet", ] = glm_roc
+
+    sumroc = roc1$sensitivities + roc1$specificities
+    cutvalue = roc1$thresholds[which(sumroc == max(sumroc))]
+    glm_pred = ifelse(testh_pred$m1h[,1] > cutvalue, as.character(unique(validate_data$group)[1]), as.character(unique(validate_data$group)[2]))
+    glm_conf_matr = as.matrix(caret::confusionMatrix(factor(glm_pred), validate_data$group))
+
+    pdf(file = "1、glm_conf_heatmap.pdf", width = 7, height = 7)
+    pheatmap::pheatmap(glm_conf_matr, display_numbers = T, fontsize = 15,
+                       cluster_rows = F, cluster_cols = F,
+                       show_colnames = T, show_rownames = T,
+    )
+    dev.off()
+    #
+    # Model training based on k-fold cross-validation, linear SVM
+    # Prediction
+    pred_svmh <- predict(svm1, validate_data, type = "prob")
+    write.csv(pred_svmh, "svm_predict.csv")
+    # Plot ROC
+    pdf(file = "2、svm_model_roc.pdf", width = 8, height = 8)
+    roc2 <- plot.roc(as.factor(validate_data$group), pred_svmh$svm[, 1], percent = TRUE, col = "#1c61b6", print.auc = TRUE,
+                     main = "Area under the curve for SVM", print.thres = "best")
+    dev.off()
+
+    svm_roc = round(as.numeric(sub(".*:", "", roc2$auc)) / 100, digits = 3)
+
+    data_auc["svm", ] = svm_roc
+
+    sumroc2 = roc2$sensitivities + roc2$specificities
+    cutvalue = roc2$thresholds[which(sumroc2 == max(sumroc2))]
+    svm_pred = ifelse(pred_svmh$svm[, 1] > cutvalue, as.character(unique(validate_data$group)[1]), as.character(unique(validate_data$group)[2]))
+    svm_conf_matr = as.matrix(caret::confusionMatrix(factor(svm_pred), validate_data$group))
+
+    pdf(file = "2、svm_conf_heatmap.pdf", width = 7, height = 7)
+    pheatmap::pheatmap(svm_conf_matr, display_numbers = T, fontsize = 15,
+                       cluster_rows = F, cluster_cols = F,
+                       show_colnames = T, show_rownames = T,
+    )
+    dev.off()
+
+    ###### RF
+    # Prediction
+    pred_rfh <- predict(model_rfh, validate_data, type = "prob")
+    write.csv(pred_rfh, "rf_predict.csv")
+    # ROC curve
+    pdf(file = "3、rf_model_roc.pdf", width = 8, height = 8)
+    roc3 <- plot.roc(validate_data$group, pred_rfh$rf[, 1], percent = TRUE, col = "#1c61b6", print.auc = TRUE,
+                     main = "Area under the curve for Random Forest", print.thres = "best")
+    dev.off()
+
+    rf_roc = round(as.numeric(sub(".*:", "", roc3$auc)) / 100, digits = 3)
+
+    data_auc["rf", ] = rf_roc
+    # ####
+    # rf_roc = round(as.numeric(sub(".*:", "", roc3$auc))/100,digits = 3)
+
+    sumroc3 = roc3$sensitivities + roc3$specificities
+    cutvalue = roc3$thresholds[which(sumroc3 == max(sumroc3))]
+    rf_pred = ifelse(pred_rfh$rf[, 1] > cutvalue, as.character(unique(validate_data$group)[1]), as.character(unique(validate_data$group)[2]))
+    rf_conf_matr = as.matrix(caret::confusionMatrix(factor(rf_pred), validate_data$group))
+
+    pdf(file = "3、rf_conf_heatmap.pdf", width = 7, height = 7)
+    pheatmap::pheatmap(rf_conf_matr, display_numbers = T, fontsize = 15,
+                       cluster_rows = F, cluster_cols = F,
+                       show_colnames = T, show_rownames = T)
+    dev.off()
+
+    #### nnet
+    pred_ann <- predict(model_nneth, validate_data, type = "prob")
+    write.csv(pred_ann, "nnet_predict.csv")
+    # Plot ROC
+    pdf(file = "4、nnet_model_roc.pdf", width = 8, height = 8)
+    roc4 <- plot.roc(validate_data$group, pred_ann$nnet[, 1], percent = TRUE, col = "#1c61b6", print.auc = TRUE,
+                     print.thres = T, main = "Area under the curve for neural networks")
+    dev.off()
+    nnet_roc = round(as.numeric(sub(".*:", "", roc4$auc)) / 100, digits = 3)
+
+    data_auc["nnet", ] = nnet_roc
+
+    # ####
+    # nnet_roc = round(as.numeric(sub(".*:", "", roc4$auc))/100,digits = 3)
+
+    sumroc4 = roc4$sensitivities + roc4$specificities
+    cutvalue = roc4$thresholds[which(sumroc4 == max(sumroc4))]
+    nnet_pred = ifelse(pred_ann$nnet[, unique(validate_data$group)[1]] > cutvalue, as.character(unique(validate_data$group)[1]), as.character(unique(validate_data$group)[2]))
+    nnet_conf_matr = as.matrix(caret::confusionMatrix(factor(nnet_pred), validate_data$group))
+
+    pdf(file = "4、nnet_conf_heatmap.pdf", width = 7, height = 7)
+    pheatmap::pheatmap(nnet_conf_matr, display_numbers = T, fontsize = 15,
+                       cluster_rows = F, cluster_cols = F,
+                       show_colnames = T, show_rownames = T,
+    )
+    dev.off()
+
+    # Plot combined ROC
+    pdf(file = "5、model_roc_combine.pdf", width = 8, height = 8)
+    roc1 <- plot.roc(as.factor(validate_data$group), testh_pred$m1h[,1], percent = TRUE, col = "#E41A1C", print.auc = F,
+                     main = "Area under the curve for different models")
+    plot(roc2, col = "#377EB8", add = T)
+    plot(roc3, col = "#4DAF4A", add = T)
+    plot(roc4, col = "#984EA3", add = T)
+
+    text.legend <- c(paste0("Logistic AUC:", glm_roc), paste0("SVM AUC:", svm_roc),
+                     paste0("Random Forest AUC:", rf_roc), paste0("Nnet AUC:", nnet_roc))
+    col.legend <- c("#E41A1C", "#377EB8", "#4DAF4A", "#984EA3")
+    legend("bottomright", pch = c(20, 20, 20, 20), legend = text.legend, cex = 1.2,
+           col = col.legend, bty = "n", horiz = F)
+    dev.off()
+    setwd("../")
+  }
+}
 
 
 

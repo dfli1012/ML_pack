@@ -45,6 +45,7 @@ batch_execute_X <- function(expression_matrix,
 
 
   random_seed <- seed
+  model_list = list()
   # Loop to generate N random seeds and execute function X
   for (i in seq_along(random_seed)) {
 
@@ -72,15 +73,19 @@ batch_execute_X <- function(expression_matrix,
 
 
 
-    data_seed[, i] = result[, 1]
+    data_seed[, i] = result[[1]]
 
+    model_list[[i]] = list(m1h = result[[2]],svm = result[[3]],rf = result[[4]],nnet = result[[5]])
     # Print progress information
     cat("Completed for seed", random_seed[i], "\n")
     setwd("../")
+
   }
 
   data_seed$average = apply(data_seed, 1, mean)
   write.csv(x = data_seed, file = "total_auc_result.csv")
+
+  return(model_list)
 }
 
 
