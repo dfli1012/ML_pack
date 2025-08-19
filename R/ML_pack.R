@@ -899,6 +899,9 @@ machine_learning = function(data, seed = 123, group_name = 1, train_percent = 0.
   write.csv(testh, file = "testh.csv")
 
   data_auc = data.frame(auc = c(rep(0, 4)), row.names = c("glmnet", "svm", "rf", "nnet"))
+  data_accuracy = data.frame(accuracy = c(rep(0, 4)), row.names = c("glmnet", "svm", "rf", "nnet"))
+
+
   set.seed(seed)
   m1h <- train(group ~ .,  # The dependent variable is group, and the independent variables are all other indicators except group, represented by group ~ .
                data = trainh,  # Train using the training set
@@ -922,7 +925,8 @@ machine_learning = function(data, seed = 123, group_name = 1, train_percent = 0.
   write.csv(best_coefficients, "glmnet_model_coef.csv")
   # Prediction
   testh_pred <- predict(m1h, testh, type = "prob")
-  write.csv(testh_pred, "glmnet_predict.csv")
+  testh_pred = cbind(testh_pred,testh[,1])
+  write.csv(testh_pred, "glmnet_predict.csv",row.names = F)
   # Plot ROC
   pdf(file = "1、glm_model_roc.pdf", width = 8, height = 8)
   roc1 <- plot.roc(as.factor(testh$group), testh_pred[, 1], percent = TRUE, col = "#1c61b6", print.auc = T,
@@ -934,8 +938,11 @@ machine_learning = function(data, seed = 123, group_name = 1, train_percent = 0.
 
   sumroc = roc1$sensitivities + roc1$specificities
   cutvalue = roc1$thresholds[which(sumroc == max(sumroc))]
-  glm_pred = ifelse(testh_pred[, 1] > cutvalue, as.character(unique(testh$group)[1]), as.character(unique(testh$group)[2]))
+  glm_pred = ifelse(testh_pred[, 1] > cutvalue, as.character(colnames(testh_pred)[1]), as.character(colnames(testh_pred)[2]))
   glm_conf_matr = as.matrix(caret::confusionMatrix(factor(glm_pred), testh$group))
+
+
+  data_accuracy["glmnet", ] = (glm_conf_matr[1,1]+glm_conf_matr[2,2])/sum(glm_conf_matr)
 
   pdf(file = "1、glm_conf_heatmap.pdf", width = 7, height = 7)
   pheatmap::pheatmap(glm_conf_matr, display_numbers = T, fontsize = 15,
@@ -972,10 +979,12 @@ machine_learning = function(data, seed = 123, group_name = 1, train_percent = 0.
 
   # Prediction
   pred_svmh <- predict(svm1, testh, type = "prob")
+  pred_svmh = cbind(pred_svmh,testh[,1])
+
   write.csv(pred_svmh, "svm_predict.csv")
   # Plot ROC
   pdf(file = "2、svm_model_roc.pdf", width = 8, height = 8)
-  roc2 <- plot.roc(as.factor(testh$group), pred_svmh[, unique(testh$group)[1]], percent = TRUE, col = "#1c61b6", print.auc = TRUE,
+  roc2 <- plot.roc(as.factor(testh$group), pred_svmh[, 1], percent = TRUE, col = "#1c61b6", print.auc = TRUE,
                    main = "Area under the curve for SVM", print.thres = "best")
   dev.off()
 
@@ -985,9 +994,11 @@ machine_learning = function(data, seed = 123, group_name = 1, train_percent = 0.
 
   sumroc2 = roc2$sensitivities + roc2$specificities
   cutvalue = roc2$thresholds[which(sumroc2 == max(sumroc2))]
-  svm_pred = ifelse(testh_pred[, 1] > cutvalue, as.character(unique(testh$group)[1]), as.character(unique(testh$group)[2]))
+  svm_pred = ifelse(pred_svmh[, 1] > cutvalue,  as.character(colnames(pred_svmh)[1]), as.character(colnames(pred_svmh)[2]))
   svm_conf_matr = as.matrix(caret::confusionMatrix(factor(svm_pred), testh$group))
 
+
+  data_accuracy["svm", ] = (svm_conf_matr[1,1]+svm_conf_matr[2,2])/sum(svm_conf_matr)
   pdf(file = "2、svm_conf_heatmap.pdf", width = 7, height = 7)
   pheatmap::pheatmap(svm_conf_matr, display_numbers = T, fontsize = 15,
                      cluster_rows = F, cluster_cols = F,
@@ -1026,10 +1037,12 @@ machine_learning = function(data, seed = 123, group_name = 1, train_percent = 0.
 
   # Prediction
   pred_rfh <- predict(model_rfh, testh, type = "prob")
-  write.csv(pred_rfh, "rf_predict.csv")
+  pred_rfh = cbind(pred_rfh,testh[,1])
+
+  write.csv(pred_rfh, "rf_predict.csv",row.names = F)
   # ROC curve
   pdf(file = "3、rf_model_roc.pdf", width = 8, height = 8)
-  roc3 <- plot.roc(testh$group, pred_rfh[, unique(testh$group)[1]], percent = TRUE, col = "#1c61b6", print.auc = TRUE,
+  roc3 <- plot.roc(testh$group, pred_rfh[,1], percent = TRUE, col = "#1c61b6", print.auc = TRUE,
                    main = "Area under the curve for Random Forest", print.thres = "best")
   dev.off()
 
@@ -1041,9 +1054,11 @@ machine_learning = function(data, seed = 123, group_name = 1, train_percent = 0.
 
   sumroc3 = roc3$sensitivities + roc3$specificities
   cutvalue = roc3$thresholds[which(sumroc3 == max(sumroc3))]
-  rf_pred = ifelse(pred_rfh[, unique(testh$group)[1]] > cutvalue, as.character(unique(testh$group)[1]), as.character(unique(testh$group)[2]))
+  rf_pred = ifelse(pred_rfh[,1] > cutvalue,  as.character(colnames(pred_rfh)[1]), as.character(colnames(pred_rfh)[2]))
   rf_conf_matr = as.matrix(caret::confusionMatrix(factor(rf_pred), testh$group))
 
+
+  data_accuracy["rf", ] = (rf_conf_matr[1,1]+rf_conf_matr[2,2])/sum(rf_conf_matr)
   pdf(file = "3、rf_conf_heatmap.pdf", width = 7, height = 7)
   pheatmap::pheatmap(rf_conf_matr, display_numbers = T, fontsize = 15,
                      cluster_rows = F, cluster_cols = F,
@@ -1072,10 +1087,12 @@ machine_learning = function(data, seed = 123, group_name = 1, train_percent = 0.
   write.csv(importance, "nnet_importance.csv")
 
   pred_ann <- predict(model_nneth, testh, type = "prob")
-  write.csv(pred_ann, "nnet_predict.csv")
+  pred_ann = cbind(pred_ann,testh[,1])
+
+  write.csv(pred_ann, "nnet_predict.csv",row.names = F)
   # Plot ROC
   pdf(file = "4、nnet_model_roc.pdf", width = 8, height = 8)
-  roc4 <- plot.roc(testh$group, pred_ann[, unique(testh$group)[1]], percent = TRUE, col = "#1c61b6", print.auc = TRUE,
+  roc4 <- plot.roc(testh$group, pred_ann[, 1], percent = TRUE, col = "#1c61b6", print.auc = TRUE,
                    print.thres = T, main = "Area under the curve for neural networks")
   dev.off()
   nnet_roc = round(as.numeric(sub(".*:", "", roc4$auc)) / 100, digits = 3)
@@ -1087,9 +1104,11 @@ machine_learning = function(data, seed = 123, group_name = 1, train_percent = 0.
 
   sumroc4 = roc4$sensitivities + roc4$specificities
   cutvalue = roc4$thresholds[which(sumroc4 == max(sumroc4))]
-  nnet_pred = ifelse(pred_ann[, unique(testh$group)[1]] > cutvalue, as.character(unique(testh$group)[1]), as.character(unique(testh$group)[2]))
+  nnet_pred = ifelse(pred_ann[,1] > cutvalue,  as.character(colnames(pred_ann)[1]), as.character(colnames(pred_ann)[2]))
   nnet_conf_matr = as.matrix(caret::confusionMatrix(factor(nnet_pred), testh$group))
 
+
+  data_accuracy["nnet", ] = (nnet_conf_matr[1,1]+nnet_conf_matr[2,2])/sum(nnet_conf_matr)
   pdf(file = "4、nnet_conf_heatmap.pdf", width = 7, height = 7)
   pheatmap::pheatmap(nnet_conf_matr, display_numbers = T, fontsize = 15,
                      cluster_rows = F, cluster_cols = F,
@@ -1118,7 +1137,7 @@ machine_learning = function(data, seed = 123, group_name = 1, train_percent = 0.
   xlsx::write.xlsx(rf_best_tune, file = "param.xlsx", sheetName = "rf", row.names = F, append = T)
   xlsx::write.xlsx(nnet_bset_tune, file = "param.xlsx", sheetName = "nnet", row.names = F, append = T)
 
-  return(list(data_auc,m1h,svm1,model_rfh,model_nneth))
+  return(list(data_auc,m1h,svm1,model_rfh,model_nneth,data_accuracy))
 }
 
 
@@ -1487,6 +1506,16 @@ machine_learning2 = function(data, seed = 123, group_name = 1, train_percent = 0
 #' @export
 
 validate_func  = function(models,validate_data,seed){
+
+  #构建初始矩阵
+  N = length(seed)
+
+  data_auc = data.frame(matrix(nrow = 4, ncol = N))
+  row.names(data_auc) = c("glmnet", "svm", "rf", "nnet")
+
+  data_acc = data.frame(matrix(nrow = 4, ncol = N))
+  row.names(data_acc) = c("glmnet", "svm", "rf", "nnet")
+
   for (i in seq_along(models)) {
     model = models[[i]]
     m1h = model["m1h"]
@@ -1497,23 +1526,32 @@ validate_func  = function(models,validate_data,seed){
     dir.create(paste0("seed_",seed[i]))
     setwd(paste0("seed_",seed[i]))
 
-    data_auc = data.frame(auc = c(rep(0, 4)), row.names = c("glmnet", "svm", "rf", "nnet"))
+    colnames(data_auc)[i] = paste0("seed_", seed[i])
+    colnames(data_acc)[i] = paste0("seed_", seed[i])
+    # data_auc = data.frame(auc = c(rep(0, 4)), row.names = c("glmnet", "svm", "rf", "nnet"))
+    # data_accuracy = data.frame(accuracy = c(rep(0, 4)), row.names = c("glmnet", "svm", "rf", "nnet"))
     # Prediction
     testh_pred <- predict(m1h, validate_data, type = "prob")
-    write.csv(testh_pred, "glmnet_predict.csv")
+
+    testh_pred = testh_pred$m1h
+    testh_pred =cbind(testh_pred,group=validate_data[,1])
+
+    write.csv(testh_pred, "glmnet_predict.csv",row.names = F)
     # Plot ROC
     pdf(file = "1、glm_model_roc.pdf", width = 8, height = 8)
-    roc1 <- plot.roc(as.factor(validate_data$group), testh_pred$m1h[,1], percent = TRUE, col = "#1c61b6", print.auc = T,
+    roc1 <- plot.roc(as.factor(validate_data$group), testh_pred[,1], percent = TRUE, col = "#1c61b6", print.auc = T,
                      main = "Area under the curve for Logistic Regression(glmnet)", print.thres = "best")
     dev.off()
     glm_roc = round(as.numeric(sub(".*:", "", roc1$auc)) / 100, digits = 3)
 
-    data_auc["glmnet", ] = glm_roc
+    data_auc["glmnet",i ] = glm_roc
 
     sumroc = roc1$sensitivities + roc1$specificities
     cutvalue = roc1$thresholds[which(sumroc == max(sumroc))]
-    glm_pred = ifelse(testh_pred$m1h[,1] > cutvalue, as.character(unique(validate_data$group)[1]), as.character(unique(validate_data$group)[2]))
+    glm_pred = ifelse(testh_pred[,1] > cutvalue, as.character(unique(validate_data$group)[1]), as.character(unique(validate_data$group)[2]))
     glm_conf_matr = as.matrix(caret::confusionMatrix(factor(glm_pred), validate_data$group))
+
+    data_acc["glmnet", i] = (glm_conf_matr[1,1]+glm_conf_matr[2,2])/sum(glm_conf_matr)
 
     pdf(file = "1、glm_conf_heatmap.pdf", width = 7, height = 7)
     pheatmap::pheatmap(glm_conf_matr, display_numbers = T, fontsize = 15,
@@ -1525,21 +1563,26 @@ validate_func  = function(models,validate_data,seed){
     # Model training based on k-fold cross-validation, linear SVM
     # Prediction
     pred_svmh <- predict(svm1, validate_data, type = "prob")
+    pred_svmh = pred_svmh$svm
+    pred_svmh = cbind(pred_svmh,group = validate_data[,1])
+
     write.csv(pred_svmh, "svm_predict.csv")
     # Plot ROC
     pdf(file = "2、svm_model_roc.pdf", width = 8, height = 8)
-    roc2 <- plot.roc(as.factor(validate_data$group), pred_svmh$svm[, 1], percent = TRUE, col = "#1c61b6", print.auc = TRUE,
+    roc2 <- plot.roc(as.factor(validate_data$group), pred_svmh[, 1], percent = TRUE, col = "#1c61b6", print.auc = TRUE,
                      main = "Area under the curve for SVM", print.thres = "best")
     dev.off()
 
     svm_roc = round(as.numeric(sub(".*:", "", roc2$auc)) / 100, digits = 3)
 
-    data_auc["svm", ] = svm_roc
+    data_auc["svm", i] = svm_roc
 
     sumroc2 = roc2$sensitivities + roc2$specificities
     cutvalue = roc2$thresholds[which(sumroc2 == max(sumroc2))]
-    svm_pred = ifelse(pred_svmh$svm[, 1] > cutvalue, as.character(unique(validate_data$group)[1]), as.character(unique(validate_data$group)[2]))
+    svm_pred = ifelse(pred_svmh[, 1] > cutvalue, as.character(unique(validate_data$group)[1]), as.character(unique(validate_data$group)[2]))
     svm_conf_matr = as.matrix(caret::confusionMatrix(factor(svm_pred), validate_data$group))
+
+    data_acc["svm", i] = (svm_conf_matr[1,1]+svm_conf_matr[2,2])/sum(svm_conf_matr)
 
     pdf(file = "2、svm_conf_heatmap.pdf", width = 7, height = 7)
     pheatmap::pheatmap(svm_conf_matr, display_numbers = T, fontsize = 15,
@@ -1551,23 +1594,29 @@ validate_func  = function(models,validate_data,seed){
     ###### RF
     # Prediction
     pred_rfh <- predict(model_rfh, validate_data, type = "prob")
+    pred_rfh = pred_rfh$rf
+
+    pred_rfh = cbind(pred_rfh,validate_data[,1])
+
     write.csv(pred_rfh, "rf_predict.csv")
     # ROC curve
     pdf(file = "3、rf_model_roc.pdf", width = 8, height = 8)
-    roc3 <- plot.roc(validate_data$group, pred_rfh$rf[, 1], percent = TRUE, col = "#1c61b6", print.auc = TRUE,
+    roc3 <- plot.roc(validate_data$group, pred_rfh[, 1], percent = TRUE, col = "#1c61b6", print.auc = TRUE,
                      main = "Area under the curve for Random Forest", print.thres = "best")
     dev.off()
 
     rf_roc = round(as.numeric(sub(".*:", "", roc3$auc)) / 100, digits = 3)
 
-    data_auc["rf", ] = rf_roc
+    data_auc["rf", i] = rf_roc
     # ####
     # rf_roc = round(as.numeric(sub(".*:", "", roc3$auc))/100,digits = 3)
 
     sumroc3 = roc3$sensitivities + roc3$specificities
     cutvalue = roc3$thresholds[which(sumroc3 == max(sumroc3))]
-    rf_pred = ifelse(pred_rfh$rf[, 1] > cutvalue, as.character(unique(validate_data$group)[1]), as.character(unique(validate_data$group)[2]))
+    rf_pred = ifelse(pred_rfh[, 1] > cutvalue, as.character(unique(validate_data$group)[1]), as.character(unique(validate_data$group)[2]))
     rf_conf_matr = as.matrix(caret::confusionMatrix(factor(rf_pred), validate_data$group))
+
+    data_acc["rf",i ] = ( rf_conf_matr[1,1]+ rf_conf_matr[2,2])/sum(rf_conf_matr)
 
     pdf(file = "3、rf_conf_heatmap.pdf", width = 7, height = 7)
     pheatmap::pheatmap(rf_conf_matr, display_numbers = T, fontsize = 15,
@@ -1577,23 +1626,28 @@ validate_func  = function(models,validate_data,seed){
 
     #### nnet
     pred_ann <- predict(model_nneth, validate_data, type = "prob")
+    pred_ann = pred_ann$nnet
+    pred_ann = cbind(pred_ann,validate_data[,1])
+
     write.csv(pred_ann, "nnet_predict.csv")
     # Plot ROC
     pdf(file = "4、nnet_model_roc.pdf", width = 8, height = 8)
-    roc4 <- plot.roc(validate_data$group, pred_ann$nnet[, 1], percent = TRUE, col = "#1c61b6", print.auc = TRUE,
+    roc4 <- plot.roc(validate_data$group, pred_ann[, 1], percent = TRUE, col = "#1c61b6", print.auc = TRUE,
                      print.thres = T, main = "Area under the curve for neural networks")
     dev.off()
     nnet_roc = round(as.numeric(sub(".*:", "", roc4$auc)) / 100, digits = 3)
 
-    data_auc["nnet", ] = nnet_roc
+    data_auc["nnet", i] = nnet_roc
 
     # ####
     # nnet_roc = round(as.numeric(sub(".*:", "", roc4$auc))/100,digits = 3)
 
     sumroc4 = roc4$sensitivities + roc4$specificities
     cutvalue = roc4$thresholds[which(sumroc4 == max(sumroc4))]
-    nnet_pred = ifelse(pred_ann$nnet[, unique(validate_data$group)[1]] > cutvalue, as.character(unique(validate_data$group)[1]), as.character(unique(validate_data$group)[2]))
+    nnet_pred = ifelse(pred_ann[, 1] > cutvalue, as.character(unique(validate_data$group)[1]), as.character(unique(validate_data$group)[2]))
     nnet_conf_matr = as.matrix(caret::confusionMatrix(factor(nnet_pred), validate_data$group))
+
+    data_acc["nnet",i ] = (nnet_conf_matr[1,1]+nnet_conf_matr[2,2])/sum(nnet_conf_matr)
 
     pdf(file = "4、nnet_conf_heatmap.pdf", width = 7, height = 7)
     pheatmap::pheatmap(nnet_conf_matr, display_numbers = T, fontsize = 15,
@@ -1604,7 +1658,7 @@ validate_func  = function(models,validate_data,seed){
 
     # Plot combined ROC
     pdf(file = "5、model_roc_combine.pdf", width = 8, height = 8)
-    roc1 <- plot.roc(as.factor(validate_data$group), testh_pred$m1h[,1], percent = TRUE, col = "#E41A1C", print.auc = F,
+    roc1 <- plot.roc(as.factor(validate_data$group), testh_pred[,1], percent = TRUE, col = "#E41A1C", print.auc = F,
                      main = "Area under the curve for different models")
     plot(roc2, col = "#377EB8", add = T)
     plot(roc3, col = "#4DAF4A", add = T)
@@ -1618,7 +1672,317 @@ validate_func  = function(models,validate_data,seed){
     dev.off()
     setwd("../")
   }
+  data_auc$average_auc = apply( data_auc,1,mean)
+
+  data_acc$average_acc = apply( data_acc,1,mean)
+
+  write.csv(x = data_auc, file = "total_test_auc_result.csv")
+  write.csv(x = data_acc, file = "total_test_acc_result.csv")
+
+  return(list(data_auc,data_acc))
 }
+
+
+#' Plotting and Evaluation Function for Machine Learning Models
+#'
+#' This function performs feature selection, model training, and evaluation across multiple feature sets.
+#' Generates performance plots and CSV outputs for both training and test datasets.
+#'
+#' @param data Dataframe for training models. First column should be group labels.
+#' @param data_test Optional test dataset for validation (default: NULL)
+#' @param train_percent Proportion of data to use for training (default: 0.7)
+#' @param n_round Number of bootstrap rounds for feature selection (default: 20)
+#' @param freature_range Range of top features to evaluate (default: c(2:10))
+#' @param N Number of random data splits to perform (default: 1)
+#' @param seed Random seed(s) for reproducibility
+#'
+#' @return List containing four dataframes:
+#' \itemize{
+#'   \item total_auc_data - Training AUC data
+#'   \item total_acc_data - Training accuracy data
+#'   \item total_auc_data_test - Test AUC data
+#'   \item total_acc_data_test - Test accuracy data
+#' }
+#'
+#' @details
+#' The function performs the following operations:
+#' 1. Creates train/test directories for output
+#' 2. Iterates over specified feature ranges
+#' 3. Performs feature selection and model training
+#' 4. Generates accuracy and AUC plots for each feature set
+#' 5. Saves combined performance metrics as CSV files
+#' 6. Produces summary plots of performance across feature ranges
+#' @export
+
+Plot_Pic_Func = function(data,#data for train
+                         data_test=NULL,train_percent = 0.7,n_round=20,
+                         freature_range = c(2:10),#use how many features
+                         N = 1,seed){
+  # total_plot_data = data.frame(matrix(ncol=4,nrow = length(seed)))
+  # colnames(total_plot_data) = c("glmnet", "svm", "rf", "nnet")
+  # row.names(total_plot_data) = paste0("seed:",seed)
+  time1 = Sys.time()
+
+  total_auc_data = data.frame()
+  total_acc_data = data.frame()
+
+  total_auc_data_test = data.frame()
+  total_acc_data_test = data.frame()
+
+  path0 = getwd()
+
+  dir.create("train")
+  dir.create("test")
+
+
+
+  for (n in freature_range) {
+
+    setwd(paste0(path0,"/train"))
+    path = paste("./","top",n)
+    dir.create(path = path)
+    setwd(path)
+
+    xxx = batch_execute_X(expression_matrix =  data,
+                          N = N,#代表N次随机分割数据，分割的随机种子见seed
+                          topn = n,#选择topn的指标用于最终建模
+                          version = 1,#version2是先特征筛选后分割数据，比较宽松,1是先分割后特征筛选和数据标准化，小队列测试效果一般比较差
+                          train_percent = train_percent,#数据分割比例，这里是训练集0.7，70%
+                          n_round = n_round,#特征筛选重采样轮数
+                          seed = seed) #这个seed由上面生产N的随机种子，也可以自定义一个向量，N个seed会出来N个结果
+
+    #acc
+    data_acc = xxx[[3]]
+    data_acc$model = row.names(data_acc)
+    data_acc$topn = paste0("top",n)
+    acc = ggplot(data_acc,aes(x = model,y = average_acc,fill = model))+
+      geom_bar(stat = "identity")+theme_test(base_size = 18)
+    #auc
+    data_auc = xxx[[2]]
+    data_auc$model = row.names(data_auc)
+    data_auc$topn = paste0("top",n)
+    auc = ggplot(data_auc,aes(x = model,y = average_auc,fill = model))+
+      geom_bar(stat = "identity")+theme_test(base_size = 18)
+
+    ggsave(filename = paste("top",n,"_acc_plot.pdf"),plot = acc)
+    ggsave(filename = paste("top",n,"_auc_plot.pdf"),plot = auc)
+
+
+    total_auc_data = rbind(total_auc_data,data_auc)
+    total_acc_data = rbind( total_acc_data,data_acc)
+
+    ##test
+    if ( !is.null(data_test)) {
+      setwd(paste0(path0,"/test"))
+      dir.create(path = path)
+      setwd(path)
+
+      test_data = validate_func(models = xxx[[1]],validate_data =  data_test,seed = seed)
+
+      data_auc_test = test_data[[1]]
+      data_auc_test$model = row.names(data_auc_test)
+      data_auc_test$topn = paste0("top",n)
+
+      #ggplot
+      auc_test = ggplot(data_auc_test,aes(x = model,y = average_auc,fill = model))+
+        geom_bar(stat = "identity")+theme_test(base_size = 18)
+
+
+      data_acc_test = test_data[[2]]
+      data_acc_test$model = row.names(data_auc_test)
+      data_acc_test$topn = paste0("top",n)
+      #ggplot
+      acc_test = ggplot(data_acc_test,aes(x = model,y = average_acc,fill = model))+
+        geom_bar(stat = "identity")+theme_test(base_size = 18)
+
+      ggsave(filename = paste("test_top",n,"_acc_plot.pdf"),plot = acc_test)
+      ggsave(filename = paste("test_top",n,"_auc_plot.pdf"),plot = auc_test)
+
+      total_auc_data_test = rbind(total_auc_data_test,data_auc_test)
+      total_acc_data_test  = rbind(total_acc_data_test,data_acc_test)
+    }
+  }
+  #训练队列汇总
+  setwd(paste0(path0,"/train"))
+  total_auc_data$topn = factor(total_auc_data$topn,levels = unique(total_auc_data$topn))
+  total_acc_data$topn = factor(total_acc_data$topn,levels = unique(total_acc_data$topn))
+
+  write.csv(x = total_auc_data,file = "train_topn_auc_combine.csv",row.names = F)
+  write.csv(x = total_acc_data,file = "train_topn_acc_combine.csv",row.names = F)
+
+  #plot
+  p1 = ggplot(total_acc_data,aes(x = topn,y = average_acc,color  = model,group =  model))+
+    geom_point(size  = 3)+
+    geom_line(linewidth = 1)+theme_test(base_size = 18)+theme(axis.text.x = element_text(angle = 50,vjust = 1,hjust = 1))
+
+  ggsave(filename = "topn_average_acc_plot.pdf",plot = p1,width = 9,height = 7)
+  ggsave(filename = "topn_average_acc_plot.png",plot = p1,width = 9,height = 7)
+
+
+  p2 = ggplot(total_auc_data,aes(x = topn,y = average_auc,color  = model,group =  model))+
+    geom_point(size  = 3)+
+    geom_line(linewidth = 1)+theme_test(base_size = 18)+theme(axis.text.x = element_text(angle = 50,vjust = 1,hjust = 1))
+
+  ggsave(filename = "topn_average_auc_plot.pdf",plot = p2,width = 9,height = 7)
+  ggsave(filename = "topn_average_auc_plot.png",plot = p2,width = 9,height = 7)
+
+  #测试队列汇总
+  if ( !is.null(data_test)){
+    setwd(paste0(path0,"/test"))
+    total_auc_data_test$topn = factor(total_auc_data_test$topn,levels = unique(total_auc_data_test$topn))
+    total_acc_data_test$topn = factor(total_acc_data_test$topn,levels = unique(total_acc_data_test$topn))
+
+    write.csv(x = total_auc_data_test,file = "test_topn_auc_combine.csv",row.names = T)
+    write.csv(x = total_acc_data_test,file = "test_topn_acc_combine.csv",row.names = T)
+    #plot
+    p3 = ggplot(total_acc_data_test,aes(x = topn,y = average_acc,color  = model,group =  model))+
+      geom_point(size  = 3)+
+      geom_line(linewidth = 1)+theme_test(base_size = 18)+theme(axis.text.x = element_text(angle = 50,vjust = 1,hjust = 1))
+
+    ggsave(filename = "topn_average_acc_plot.pdf",plot = p3,width = 9,height = 7)
+    ggsave(filename = "topn_average_acc_plot.png",plot = p3,width = 9,height = 7)
+
+
+    p4 = ggplot(total_auc_data_test,aes(x = topn,y = average_auc,color  = model,group =  model))+
+      geom_point(size  = 3)+
+      geom_line(linewidth = 1)+theme_test(base_size = 18)+theme(axis.text.x = element_text(angle = 50,vjust = 1,hjust = 1))
+
+    ggsave(filename = "topn_average_auc_plot.pdf",plot = p4,width = 9,height = 7)
+    ggsave(filename = "topn_average_auc_plot.png",plot = p4,width = 9,height = 7)
+  }
+
+  setwd(path0)
+  time2 = Sys.time()
+  print(time2-time1)
+
+  if ( !is.null(data_test)){
+    return(list(total_auc_data,total_acc_data,total_auc_data_test, total_acc_data_test))
+  }else{
+    return(list(total_auc_data,total_acc_data))
+  }
+
+}
+
+
+#' Filter Features by Missing Rate
+#'
+#' Removes features (rows) with missing values above a specified threshold.
+#'
+#' @param expr_mat Matrix or dataframe where rows represent features
+#' @param thresh Maximum allowable missing rate (0-1)
+#'
+#' @return Filtered matrix or dataframe with features below missing threshold
+#'
+#' @details
+#' Calculates missing rate per row (feature) and retains features where:
+#' (number of missing values / total samples) <= threshold
+
+filter_by_missing_rate <- function(expr_mat, thresh) {
+  # 检查输入
+  if (!is.matrix(expr_mat) && !is.data.frame(expr_mat)) {
+    stop("expr_mat 必须是矩阵或 data.frame")
+  }
+  if (!is.numeric(thresh) || length(thresh) != 1 || thresh < 0 || thresh > 1) {
+    stop("thresh 必须是 0 到 1 之间的单个数值")
+  }
+
+  # 计算每一行的缺失率
+  # is.na(expr_mat) 会生成同维度的逻辑矩阵
+  # rowMeans 将 TRUE 视为 1，FALSE 视为 0
+  missing_rate <- rowMeans(is.na(expr_mat))
+
+  # 选择缺失率小于等于阈值的行
+  keep_rows <- missing_rate <= thresh
+
+  # 返回过滤后的对象，保留原来类型（matrix 或 data.frame）
+  if (is.matrix(expr_mat)) {
+    return(expr_mat[keep_rows, , drop = FALSE])
+  } else {
+    return(expr_mat[keep_rows, , drop = FALSE])
+  }
+}
+
+
+#' Max-Min Normalization
+#'
+#' Performs max-min normalization (feature scaling) on each column of a matrix.
+#' Transforms features to a [0, 1] range using the formula: (x - min) / (max - min).
+#'
+#' @param expr_matrix Numeric matrix or dataframe to be normalized (features in columns)
+#'
+#' @return Normalized matrix with same dimensions and dimnames as input
+#'
+#' @details
+#' Handles constant columns (where max == min) by setting all values to 0.
+#' Preserves original row and column names. Removes missing values during calculation.
+#' @export
+#'
+max_min_normalize <- function(expr_matrix) {
+  # 对输入矩阵的每一列进行max-min标准化
+  normalized <- apply(expr_matrix, 2, function(feature) {
+    min_val <- min(feature, na.rm = TRUE)  # 计算该特征最小值
+    max_val <- max(feature, na.rm = TRUE)  # 计算该特征最大值
+    range <- max_val - min_val
+
+    # 处理常数列（避免除以0）
+    if (range == 0) {
+      warning("常数列检测，标准化后该列将全部置为0")
+      return(rep(0, length(feature)))
+    }
+
+    # 应用max-min标准化公式
+    return((feature - min_val) / range)
+  })
+
+  # 保留原始行名和列名
+  dimnames(normalized) <- dimnames(expr_matrix)
+  return(normalized)
+}
+
+
+#' Random Data Splitting
+#'
+#' Splits a dataset into training and testing subsets using random sampling.
+#'
+#' @param data Dataframe or matrix to split
+#' @param train_ratio Proportion of data for training set (default: 0.7)
+#' @param seed Random seed for reproducibility (default: NULL)
+#'
+#' @return List containing two elements:
+#' \itemize{
+#'   \item train - Training subset
+#'   \item test - Testing subset
+#' }
+#'
+#' @details
+#' Ensures disjoint training/testing sets. Maintains original row order in subsets.
+#' Uses floor rounding for sample size calculation (e.g., 7 samples for n=10, ratio=0.7).
+#' @export
+#'
+random_split_data <- function(data, train_ratio = 0.7, seed = NULL) {
+
+  if (!is.null(seed)) set.seed(seed)  # 设置随机种子
+
+  if (train_ratio < 0 || train_ratio > 1) {
+    stop("训练集比例必须在0到1之间")
+  }
+
+  # n <- nrow(data)  # 样本总数
+  # train_size <- floor(train_ratio * n)  # 训练集样本数
+  #
+  # # 随机抽样索引
+  # train_indices <- sample(seq_len(n), size = train_size, replace = FALSE)
+
+  train_indices <- createDataPartition(data[,1],p = train_ratio,list = F)
+  # 创建训练集和测试集
+  train_set <- data[train_indices, , drop = FALSE]
+  test_set <- data[-train_indices, , drop = FALSE]
+
+  # 返回结果列表
+  return(list(train = train_set, test = test_set))
+}
+
+
 
 
 

@@ -40,9 +40,11 @@ batch_execute_X <- function(expression_matrix,
                             train_percent = 0.7,
                             group_name = 1) {
 
-  data_seed = data.frame(matrix(nrow = 4, ncol = N))
-  row.names(data_seed) = c("glmnet", "svm", "rf", "nnet")
+  data_auc = data.frame(matrix(nrow = 4, ncol = N))
+  row.names(data_auc) = c("glmnet", "svm", "rf", "nnet")
 
+  data_acc = data.frame(matrix(nrow = 4, ncol = N))
+  row.names(data_acc) = c("glmnet", "svm", "rf", "nnet")
 
   random_seed <- seed
   model_list = list()
@@ -50,7 +52,8 @@ batch_execute_X <- function(expression_matrix,
   for (i in seq_along(random_seed)) {
 
     # Generate random seed
-    colnames(data_seed)[i] = paste0("seed_", random_seed[i])
+    colnames(data_auc)[i] = paste0("seed_", random_seed[i])
+    colnames(data_acc)[i] = paste0("seed_", random_seed[i])
 
     # Create a folder named after the random seed
     seed_folder <- paste0(i, "、seed=", random_seed[i])
@@ -73,7 +76,9 @@ batch_execute_X <- function(expression_matrix,
 
 
 
-    data_seed[, i] = result[[1]]
+    data_auc[, i] = result[[1]]
+    data_acc[, i] = result[[6]]
+
 
     model_list[[i]] = list(m1h = result[[2]],svm = result[[3]],rf = result[[4]],nnet = result[[5]])
     # Print progress information
@@ -82,10 +87,14 @@ batch_execute_X <- function(expression_matrix,
 
   }
 
-  data_seed$average = apply(data_seed, 1, mean)
-  write.csv(x = data_seed, file = "total_auc_result.csv")
+  data_auc$average_auc = apply( data_auc,1,mean)
 
-  return(model_list)
+  data_acc$average_acc = apply( data_acc,1,mean)
+
+  write.csv(x = data_auc, file = "total_auc_result.csv")
+  write.csv(x = data_acc, file = "total_acc_result.csv")
+
+  return(list(model_list,data_auc,data_acc))
 }
 
 
